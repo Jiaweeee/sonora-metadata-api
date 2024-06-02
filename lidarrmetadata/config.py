@@ -459,7 +459,12 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
 
     # Provider -> (args, kwargs) dictionaries
     PROVIDERS = {
-        'MUSICBRAINZDBPROVIDER': ([], {'DB_HOST': 'db', 'DB_PORT': 5432}),
+        'MUSICBRAINZDBPROVIDER': ([], {
+            'DB_HOST': 'db',
+            'DB_PORT': 5432,
+            'DB_USER': 'abc',
+            'DB_PASSWORD': 'abc'
+        }),
         'SOLRSEARCHPROVIDER': ([], {'SEARCH_SERVER': 'http://solr:8983/solr'}),
         'FANARTTVPROVIDER': ([FANART_KEY], {}),
         'WIKIPEDIAPROVIDER': ([], {}),
