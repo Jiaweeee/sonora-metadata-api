@@ -280,10 +280,11 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     ]
     
     # Host definitions used elsewhere
-    REDIS_HOST = 'redis'
+    REDIS_HOST = 'localhost'
     REDIS_PORT = 6379
-    POSTGRES_CACHE_HOST = 'db'
+    POSTGRES_CACHE_HOST = 'localhost'
     POSTGRES_CACHE_PORT = 5432
+    MB_DB_HOST = '195.35.14.156'
 
     # TTL set in Cache-Control headers.  Use 0 to disable caching.
     # The GOOD value is used if we got info from all providers
@@ -300,7 +301,6 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
         'provider_error': 60 * 30,
         'redis': DAYS * 7,
         'fanart': DAYS * 30,
-        'tadb': DAYS * 30,
         'wikipedia': DAYS * 7
     }
     
@@ -319,13 +319,6 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
             'endpoint': POSTGRES_CACHE_HOST,
             'port': POSTGRES_CACHE_PORT,
             'db_table': 'fanart',
-            'timeout': 0,
-        },
-        'tadb': {
-            'cache': 'lidarrmetadata.cache.PostgresCache',
-            'endpoint': POSTGRES_CACHE_HOST,
-            'port': POSTGRES_CACHE_PORT,
-            'db_table': 'tadb',
             'timeout': 0,
         },
         'wikipedia': {
@@ -361,7 +354,6 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     CRAWLER_BATCH_SIZE = {
         'wikipedia': 50,
         'fanart': 500,
-        'tadb': 500,
         'artist': 100,
         'album': 100
     }
@@ -371,12 +363,6 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
             'cache': 'lidarrmetadata.cache.NullCache',
         },
         'fanart': {
-            'cache': 'lidarrmetadata.cache.NullCache',
-            'serializer': {
-                'class': 'lidarrmetadata.cache.ExpirySerializer'
-            },
-        },
-        'tadb': {
             'cache': 'lidarrmetadata.cache.NullCache',
             'serializer': {
                 'class': 'lidarrmetadata.cache.ExpirySerializer'
@@ -423,7 +409,7 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     # Rate limit time delta in ms
     EXTERNAL_LIMIT_TIME_DELTA = 1000
     # Request timeout in ms
-    EXTERNAL_TIMEOUT = 250
+    EXTERNAL_TIMEOUT = 1000
 
     # Redis db if using RedisRateLimiter
     EXTERNAL_LIMIT_REDIS_DB = 10
@@ -433,13 +419,10 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     EXTERNAL_LIMIT_REDIS_PORT = REDIS_PORT
 
     # Fanart.tv API credentials
-    FANART_KEY = ''
+    FANART_KEY = 'e730454add1a72eed2bcc4dbc73d9775' #TODO
     # The API for standard keys is supposed to be delayed by 7 days but
     # in practise it appears the lag is slightly more
     FANART_API_DELAY_SECONDS = 8 * 24 * 60 * 60
-
-    # TADB API credentials
-    TADB_KEY = '1'
 
     # Port to use
     HTTP_PORT = 5001
@@ -460,15 +443,14 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     # Provider -> (args, kwargs) dictionaries
     PROVIDERS = {
         'MUSICBRAINZDBPROVIDER': ([], {
-            'DB_HOST': 'db',
+            'DB_HOST': MB_DB_HOST,
             'DB_PORT': 5432,
-            'DB_USER': 'abc',
-            'DB_PASSWORD': 'abc'
+            'DB_USER': 'musicbrainz',
+            'DB_PASSWORD': 'musicbrainz'
         }),
-        'SOLRSEARCHPROVIDER': ([], {'SEARCH_SERVER': 'http://solr:8983/solr'}),
+        'SOLRSEARCHPROVIDER': ([], {'SEARCH_SERVER': f'http://{MB_DB_HOST}:8983/solr'}),
         'FANARTTVPROVIDER': ([FANART_KEY], {}),
         'WIKIPEDIAPROVIDER': ([], {}),
-        'THEAUDIODBPROVIDER': ([TADB_KEY], {}),
         'SPOTIFYAUTHPROVIDER': ([], {'CLIENT_ID': SPOTIFY_ID, 'CLIENT_SECRET': SPOTIFY_SECRET, 'REDIRECT_URI': SPOTIFY_REDIRECT_URL}),
         'SPOTIFYPROVIDER': ([], {'CLIENT_ID': SPOTIFY_ID, 'CLIENT_SECRET': SPOTIFY_SECRET})
     }

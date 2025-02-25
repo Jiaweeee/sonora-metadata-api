@@ -1,17 +1,9 @@
 version: "3"
 
 volumes:
-  pgdata:
-    driver: local
-  dbdump:
-    driver: local
-  searchdump:
-    driver: local
-  solrdata:
-    driver: local
-  rabbitdata:
-    driver: local
   redisdata:
+    driver: local
+  cache_pgdata:
     driver: local
 
 services:
@@ -23,63 +15,17 @@ services:
     volumes:
       - redisdata:/data
       - $PWD/redis.conf:/usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
 
-  db:
-    image: ghcr.io/lidarr/mb-postgres:1.0.10
+  cache-db:
+    image: postgres:13
     restart: unless-stopped
-    
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
-    env_file:
-      - ./postgres.env
-    
-  musicbrainz:
-    image: ghcr.io/lidarr/mb-server:1.0.10
-    restart: unless-stopped
-
-    volumes:
-      - dbdump:/media/dbdump
-      - searchdump:/media/searchdump
-
-    env_file:
-      - ./postgres.env
-
-    depends_on:
-      - db
-      - redis
-
-  search:
-    image: ghcr.io/lidarr/mb-solr:3.3.1.9
-    restart: unless-stopped
-  
-    volumes:
-      - solrdata:/opt/solr/server/solr/data
-      - searchdump:/media/searchdump
-    
-  indexer:
-    image: ghcr.io/lidarr/mb-sir:1.0.10
-    restart: unless-stopped
-
-    entrypoint: python -m sir -d amqp_watch --entity-type artist --entity-type release-group
-
-    volumes:
-      - $PWD/sir/config.ini:/code/config.ini
-
-    depends_on:
-      - db
-      - rabbit
-      - search
-    
-  rabbit:
-    image: rabbitmq:3.8
-    restart: unless-stopped
-
-    volumes:
-      - rabbitdata:/var/lib/rabbitmq/mnesia
-    
-    hostname: rabbit
-  
     environment:
-      RABBITMQ_DEFAULT_USER: "abc"
-      RABBITMQ_DEFAULT_PASS: "abc"
+      POSTGRES_USER: abc
+      POSTGRES_PASSWORD: abc
+      POSTGRES_DB: lm_cache_db
+    volumes:
+      - cache_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"

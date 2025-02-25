@@ -5,7 +5,7 @@ from lidarrmetadata import provider
 
 
 class TestWikipediaProvider:
-    def setup(self):
+    def setup_method(self, method):
         self.provider = provider.WikipediaProvider()
 
     @pytest.mark.asyncio

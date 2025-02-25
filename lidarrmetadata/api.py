@@ -59,10 +59,10 @@ async def get_overview(links, mbid=None):
             lambda link: 'wikipedia' in link.get('type', ''),
             links), None)
 
-        if wikidata_link:
-            overview, expiry = await overview_providers[0].get_artist_overview(wikidata_link['target'])
-        elif wikipedia_link:
+        if wikipedia_link:
             overview, expiry = await overview_providers[0].get_artist_overview(wikipedia_link['target'])
+        elif wikidata_link:
+            overview, expiry = await overview_providers[0].get_artist_overview(wikidata_link['target'])
 
         if len(overview_providers) > 1 and mbid and not overview:
             overview, expiry = await overview_providers[1].get_artist_overview(mbid)

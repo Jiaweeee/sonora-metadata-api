@@ -519,135 +519,6 @@ class HttpProvider(Provider,
             logger.debug(f'{self._name} request rate limited')
             self._count_request('ratelimit')
 
-class TheAudioDbProvider(HttpProvider,
-                         ArtistOverviewMixin,
-                         ArtistArtworkMixin):
-    def __init__(self,
-                 api_key,
-                 base_url='theaudiodb.com/api/v1/json',
-                 use_https=True,
-                 session=None,
-                 limiter=None):
-        """
-        Class initialization
-
-        :param api_key: fanart.tv API key
-        :param base_url: Base URL of API. Defaults to
-                         webservice.fanart.tv/v3/music
-        :param use_https: Whether or not to use https. Defaults to True.
-        """
-        super().__init__('tadb', session, limiter)
-
-        self._api_key = api_key
-        self._base_url = base_url
-        self.use_https = use_https
-        
-    def build_url(self, mbid):
-        """
-        Builds query url
-        :param mbid: Musicbrainz ID of resource
-        :return: URL to query
-        """
-        scheme = 'https://' if self.use_https else 'http://'
-        url = scheme + self._base_url
-        if url[-1] != '/':
-            url += '/'
-        url += f'{self._api_key}/artist-mb.php?i={mbid}'
-        return url
-
-    async def get_artist_images(self, artist_id):
-        
-        return await self.get_data(artist_id, self.parse_artist_images)
-
-    async def get_artist_overview(self, artist_id):
-
-        return await self.get_data(artist_id, self.parse_artist_overview)
-        
-    async def get_data(self, mbid, handler):
-
-        cached, expires = await util.TADB_CACHE.get(mbid)
-        now = utcnow()
-        
-        if expires > now:
-            return handler(cached), expires
-
-        # TheAudioDb provides invalid json for some artists so set these to {}
-        ttl = CONFIG.CACHE_TTL['tadb']
-        try:
-            results = await self.get_by_mbid(mbid)
-        except ValueError:
-            results = {}
-        except:
-            results = cached or {}
-            ttl = CONFIG.CACHE_TTL['provider_error']
-
-        results, ttl = await self.cache_results(mbid, results, ttl)
-        
-        return handler(results), now + timedelta(seconds=ttl)
-
-    async def refresh_data(self, mbid):
-        try:
-            results = await self.get_by_mbid(mbid)
-        except ProviderUnavailableException:
-            logger.debug("TADB unavailable")
-            await util.TADB_CACHE.expire(mbid, CONFIG.CACHE_TTL['provider_error'])
-            return
-        except:
-            results = {}
-
-        await self.cache_results(mbid, results)
-        
-    async def get_by_mbid(self, mbid):
-        """
-        Gets the theaudiodb.com response for resource with Musicbrainz id mbid
-        :param mbid: Musicbrainz ID
-        :return: response for mbid
-        """
-        url = self.build_url(mbid)
-        return await self.get_with_limit(url)
-        
-    async def cache_results(self, mbid, results, ttl=CONFIG.CACHE_TTL['tadb']):
-        results = results.get('artists', None)
-        if isinstance(results, list):
-            results = results[0]
-
-        await util.TADB_CACHE.set(mbid, results, ttl=ttl)
-
-        return results, ttl
-
-    @staticmethod
-    def parse_artist_images(response):
-        """
-        Parses artist images to our expected format
-        :param response: API response
-        :return: List of images in our expected format
-        """
-        if not response:
-            return []
-
-        image_mapping = {
-            "Banner": "strArtistBanner",
-            "Fanart": "strArtistFanart",
-            "Logo": "strArtistLogo",
-            "Poster": "strArtistThumb"
-        }
-        
-        images = {k: response.get(v) for k, v in image_mapping.items()}
-        return [{'CoverType': key, 'Url': response_url(value)}
-                for key, value in images.items() if value]
-
-    @staticmethod
-    def parse_artist_overview(response):
-        """
-        Parses artist overview to our expected format
-        :param response: API response
-        :return: Overview string
-        """
-        if not response:
-            return ''
-
-        return response.get('strBiographyEN', '')
-
 class FanArtTvProvider(HttpProvider, 
                        AlbumArtworkMixin, 
                        ArtistArtworkMixin,
@@ -897,7 +768,7 @@ class SolrSearchProvider(HttpProvider,
     Provider that uses a solr indexed search
     """
     def __init__(self,
-                 search_server='http://solr:8983/solr'):
+                 search_server=f'http://{CONFIG.MB_DB_HOST}:8983/solr'):
         """
         Class initialization
 
@@ -1023,11 +894,11 @@ class MusicbrainzDbProvider(Provider,
     """
 
     def __init__(self,
-                 db_host='localhost',
+                 db_host=CONFIG.MB_DB_HOST,
                  db_port=5432,
                  db_name='musicbrainz_db',
-                 db_user='abc',
-                 db_password='abc'):
+                 db_user='musicbrainz',
+                 db_password='musicbrainz'):
         """
         Class initialization
 
@@ -1356,7 +1227,7 @@ class WikipediaProvider(HttpProvider, ArtistOverviewMixin):
         else:
             cached = None
         
-        logger.debug("getting overview")
+        logger.debug(f"getting overview, url = {url}")
         
         try:
             summary = await self.wikidata_get_summary_from_url(url) if 'wikidata' in url else await self.wikipedia_get_summary_from_url(url)
@@ -1455,6 +1326,7 @@ class WikipediaProvider(HttpProvider, ArtistOverviewMixin):
             '&formatversion=2'
             '&titles={title}'
         ).format(language = language, title = title)
+        logger.debug(f"getting summary from wikipedia, url = {wiki_url}")
         
         data = await self.get_with_limit(wiki_url)
         return data.get('query', {}).get('pages', [{}])[0].get('extract', '')
