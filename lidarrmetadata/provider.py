@@ -452,8 +452,10 @@ class HttpProvider(Provider,
         if self._session is None:
             async with self._session_lock:
                 logger.debug("Initializing AIOHTTP Session")
-                
-                self._session = aiohttp.ClientSession(timeout = aiohttp.ClientTimeout(total=CONFIG.EXTERNAL_TIMEOUT / 1000))
+                self._session = aiohttp.ClientSession(
+                    timeout = aiohttp.ClientTimeout(total=CONFIG.EXTERNAL_TIMEOUT / 1000),
+                    trust_env=True
+                )
                 
         return self._session
             
@@ -1276,6 +1278,7 @@ class WikipediaProvider(HttpProvider, ArtistOverviewMixin):
             '&props=sitelinks|descriptions'
             '&format=json'
         ).format(entity)
+        logger.debug(f"getting summary from wikidata, url = {wikidata_url}")
         
         data = await self.get_with_limit(wikidata_url)
         return (
@@ -1294,6 +1297,7 @@ class WikipediaProvider(HttpProvider, ArtistOverviewMixin):
             '&props=sitelinks|descriptions'
             '&format=json'
         ).format(language=language, title=title)
+        logger.debug(f"getting summary from wikidata, url = {wikidata_url}")
         data = await self.get_with_limit(wikidata_url)
         entities = data.get('entities', {})
         return entities[next(iter(entities))]

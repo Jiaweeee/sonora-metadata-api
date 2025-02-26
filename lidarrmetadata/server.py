@@ -37,7 +37,11 @@ def main():
         'bind': '0.0.0.0:{port}'.format(port=config.HTTP_PORT),
         'log_level': 'debug',
         'workers': 1,
-        'worker_class': 'uvicorn.workers.UvicornWorker'
+        'worker_class': 'uvicorn.workers.UvicornWorker',
+        'reload': True,
+        'reload_extra_files': [
+            '/Users/jiawei.an/code/LidarrAPI.Metadata/lidarrmetadata/config.py',
+        ]
     }
 
     StandaloneApplication(app, options).run()
