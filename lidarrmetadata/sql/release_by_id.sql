@@ -58,12 +58,9 @@ WITH release_info AS (
        WHERE release_label.release = release.id
        ORDER BY name ASC
     ) AS Label,
-    array(
-      SELECT name FROM area
-                     JOIN country_area ON country_area.area = area.id
-                     JOIN release_country ON release_country.country = country_area.area
-       WHERE release_country.release = release.id
-    ) AS Country,
+    
+    -- 移除 Country 相关查询
+
     array(
       SELECT json_build_object(
         'Format', medium_format.name,
@@ -74,41 +71,33 @@ WITH release_info AS (
        WHERE medium.release = release.id
        ORDER BY medium.position
     ) AS Media,
-    (SELECT SUM(medium.track_count) FROM medium WHERE medium.release = release.id) AS track_count,
+    
+    -- 修改 Tracks 查询，添加排序
+    -- 修改 Tracks 查询部分
     (
       SELECT
-        COALESCE(json_agg(row_to_json(track_data)), '[]'::json)
+        COALESCE(json_agg(row_to_json(track_data) ORDER BY track_data.TrackPosition), '[]'::json)
         FROM (
           SELECT
             track.gid AS Id,
-            array(
-              SELECT gid
-                FROM track_gid_redirect
-               WHERE track_gid_redirect.new_id = track.id
-            ) as OldIds,
-            recording.gid AS RecordingId,
-            array(
-              SELECT gid
-                FROM recording_gid_redirect
-               WHERE recording_gid_redirect.new_id = recording.id
-            ) as OldRecordingIds,
-            artist.gid AS ArtistId,
             track.name AS TrackName,
-            track.length AS DurationMs,
-            medium.position AS MediumNumber,
-            track.number AS TrackNumber,
-            track.position AS TrackPosition
+            track.position AS TrackPosition,
+            track.length as Duration,
+            (
+              SELECT array_agg(artist.name ORDER BY artist_credit_name.position)
+              FROM artist_credit_name
+              JOIN artist ON artist_credit_name.artist = artist.id
+              WHERE artist_credit_name.artist_credit = track.artist_credit
+            ) as ArtistNames
             FROM track
-                   JOIN medium ON track.medium = medium.id
-                   JOIN artist_credit_name ON artist_credit_name.artist_credit = track.artist_credit
-                   JOIN artist ON artist_credit_name.artist = artist.id
-                   JOIN recording ON track.recording = recording.id
+              JOIN medium ON track.medium = medium.id
+              JOIN recording ON track.recording = recording.id
            WHERE medium.release = release.id
-             AND artist_credit_name.position = 0
              AND recording.video = FALSE
              AND track.is_data_track = FALSE
         ) track_data
     ) AS Tracks,
+
     json_build_object(
       'Id', release_group.gid,
       'OldIds', (
