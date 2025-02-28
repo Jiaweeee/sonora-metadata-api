@@ -113,3 +113,5 @@ db.json
 # Emacs
 *~
 \#*\#
+
+temp/
