@@ -18,7 +18,7 @@ from lidarrmetadata import util
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 logger.info('Have api logger')
 
 CONFIG = config.get_config()
@@ -272,3 +272,40 @@ async def get_release_group_info(mbid):
     del release_group['artistids']
     
     return release_group, min(rg_expiry, artist_expiry)
+
+async def get_release_info_basic(mbid):
+    release_provider = provider.get_providers_implementing(provider.ReleaseByIdMixin)[0]
+    releases = await release_provider.get_release_by_id([mbid])
+    for release in releases:
+        # 提取 streaming links
+        if 'links' in release:
+            streaming_links = []
+            for link in release['links']:
+                if 'streaming' in link['type']:
+                    url = link['url'].lower()
+                    if 'spotify' in url:
+                        streaming_links.append({
+                            'source': 'spotify',
+                            'url': link['url']
+                        })
+                    elif 'music.apple' in url:
+                        streaming_links.append({
+                            'source': 'apple_music',
+                            'url': link['url']
+                        })
+            if streaming_links:
+                release['streaming_links'] = streaming_links
+        # 删除无用字段
+        if 'oldids' in release:
+            del release['oldids']
+        if 'media' in release:
+            del release['media']
+        if 'status' in release:
+            del release['status']
+    return releases[0]
+
+async def get_release_info(mbid):
+    release = await get_release_info_basic(mbid)
+    overview, _ = await get_overview(release['wiki_links'])
+    release['overview'] = overview
+    return release

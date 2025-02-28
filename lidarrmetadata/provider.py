@@ -257,6 +257,19 @@ class ReleasesByReleaseGroupIdMixin(MixinBase):
         """
         pass
 
+class ReleaseByIdMixin(MixinBase):
+    """
+    Gets release by ID
+    """
+    @abc.abstractmethod
+    def get_release_by_id(self, rids):
+        """
+        Gets release by ID
+        :param rids: List of release IDs
+        :return: Release corresponding to rid
+        """
+        pass
+
 class SeriesMixin(MixinBase):
     """
     Musicbrainz series
@@ -890,6 +903,7 @@ class MusicbrainzDbProvider(Provider,
                             ReleaseGroupByArtistMixin,
                             ReleaseGroupByIdMixin,
                             ReleaseGroupIdListMixin,
+                            ReleaseByIdMixin,
                             SeriesMixin):
     """
     Provider for directly querying musicbrainz database
@@ -1028,8 +1042,14 @@ class MusicbrainzDbProvider(Provider,
         return [item['gid'] for item in results]
 
     @staticmethod
-    def _build_caa_url(release_id, image_id):
-        return 'https://imagecache.lidarr.audio/v1/caa/{}/{}-1200.jpg'.format(release_id, image_id)
+    def _build_caa_url(release_id, image_id, size=1200):
+        """
+        Builds the cover art archive url for a given release and image id
+        :param release_id: Musicbrainz release id
+        :param image_id: Musicbrainz image id
+        :param size: Size of image to return. Should be one of: 250, 500, 1200
+        """
+        return 'https://imagecache.lidarr.audio/v1/caa/{}/{}-{}.jpg'.format(release_id, image_id, size)
     
     @classmethod
     def _load_artist(cls, data):
@@ -1081,7 +1101,40 @@ class MusicbrainzDbProvider(Provider,
         release_groups = [self._load_release_group(item['album']) for item in release_groups]
 
         return release_groups
-
+    
+    async def get_release_by_id(self, rids):
+        releases = await self.query_from_file('release_by_id.sql', rids)
+        
+        logger.debug("got releases: ")
+        
+        if not releases:
+            return None
+        
+        results = []
+        for release_data in releases:
+            release = json.loads(release_data['release'])    
+            # 处理 release group 信息
+            if 'releasegroup' in release:
+                release_group = release['releasegroup']
+                release['type'] = release_group['Type']
+                # 提取 wiki 相关链接
+                if 'Links' in release_group:
+                    wiki_links = [
+                        link for link in release_group['Links'] 
+                        if any(wiki in link['type'].lower() for wiki in ['wikidata', 'wikipedia'])
+                    ]
+                    if wiki_links:
+                        release['wiki_links'] = wiki_links
+                del release['releasegroup']
+            # 处理 cover art
+            if 'images' in release:
+                image = release['images'][0] if len(release['images']) > 0 else None
+                url = self._build_caa_url(release['id'], image['id'], size=250) if image else None
+                release['image'] = url
+                del release['images']
+            results.append(release)
+        return results
+    
     async def get_release_groups_by_recording_ids(self, rids):
         results = await self.query_from_file('release_group_by_recording_ids.sql', len(rids), rids)
 

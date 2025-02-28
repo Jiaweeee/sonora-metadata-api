@@ -211,6 +211,14 @@ async def get_release_group_info_route(mbid):
     
     return await add_cache_control_header(jsonify(output), expiry)
 
+@app.route('/release/<mbid>', methods=['GET'])
+async def get_release_info_route(mbid):
+    uuid_validation_response = validate_mbid(mbid)
+    if uuid_validation_response:
+        return uuid_validation_response
+    output = await api.get_release_info(mbid)
+    return jsonify(output)
+
 @app.route('/album/<mbid>/refresh', methods=['POST'])
 async def refresh_release_group_route(mbid):
     uuid_validation_response = validate_mbid(mbid)

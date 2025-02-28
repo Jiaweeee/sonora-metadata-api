@@ -409,7 +409,7 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     # Rate limit time delta in ms
     EXTERNAL_LIMIT_TIME_DELTA = 1000
     # Request timeout in ms
-    EXTERNAL_TIMEOUT = 1000
+    EXTERNAL_TIMEOUT = 2000
 
     # Redis db if using RedisRateLimiter
     EXTERNAL_LIMIT_REDIS_DB = 10
