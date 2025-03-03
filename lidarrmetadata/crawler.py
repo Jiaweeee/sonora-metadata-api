@@ -83,15 +83,65 @@ async def update_fanart(count = 500, max_ttl = 60 * 60):
             if not keys:
                 await asyncio.sleep(60)
             
+def format_elapsed_time(elapsed, count=None):
+    """
+    格式化运行时间,可选显示处理速度
+    """
+    hours = int(elapsed // 3600)
+    minutes = int((elapsed % 3600) // 60)
+    seconds = elapsed % 60
+    
+    time_str = f"{hours}h {minutes}m {seconds:.1f}s" if hours > 0 else \
+               f"{minutes}m {seconds:.1f}s" if minutes > 0 else \
+               f"{seconds:.1f}s"
+               
+    if count is not None:
+        return f"{time_str} ({count/elapsed:.1f} items/s)"
+    return time_str
+
 async def initialize_artists():
     id_provider = provider.get_providers_implementing(provider.ArtistIdListMixin)[0]
     
-    ids = await id_provider.get_all_artist_ids()
+    start = timer()
     
-    pairs = [(id, None) for id in ids]
+    # 并行执行多个请求
+    page_size = 2000
+    concurrent_requests = 10
+    all_ids = []
+    
+    async def fetch_page(offset):
+        ids = await id_provider.get_artist_ids_paged(limit=page_size, offset=offset)
+        if ids:
+            logger.debug(f"Retrieved {len(ids)} artist IDs from offset {offset}")
+            return ids
+        return []
+    
+    offset = 0
+    while True:
+        # 创建多个并发任务
+        tasks = []
+        for _ in range(concurrent_requests):
+            tasks.append(fetch_page(offset))
+            offset += page_size
+            
+        # 并行执行所有任务
+        results = await asyncio.gather(*tasks)
+        
+        # 处理结果
+        new_ids = [id for page_ids in results if page_ids for id in page_ids]
+        if not new_ids:
+            break
+            
+        all_ids.extend(new_ids)
+        logger.debug(f"Total retrieved {len(all_ids)} artist IDs so far...")
+    
+    pairs = [(id, None) for id in all_ids]
     
     await util.ARTIST_CACHE.clear()
     await util.ARTIST_CACHE.multi_set(pairs, ttl=0, timeout=None)
+    
+    elapsed = timer() - start
+    logger.info(f"Initialized {len(all_ids)} artists in {format_elapsed_time(elapsed, len(all_ids))}")
     
 async def initialize_albums():
     id_provider = provider.get_providers_implementing(provider.ReleaseGroupIdListMixin)[0]
@@ -157,23 +207,23 @@ async def initialize():
 def main():
     
     parser = argparse.ArgumentParser(prog="lidarr-metadata-crawler")
-    parser.add_argument("--initialize-artists", action="store_true")
-    parser.add_argument("--initialize-albums", action="store_true")
-    parser.add_argument("--initialize-spotify", action="store_true")
+    parser.add_argument("--init-artists", action="store_true")
+    parser.add_argument("--init-albums", action="store_true")
+    # parser.add_argument("--initialize-spotify", action="store_true")
     
     args = parser.parse_args()
     
-    if args.initialize_artists:
+    if args.init_artists:
         asyncio.run(initialize_artists())
         sys.exit()
 
-    if args.initialize_albums:
+    if args.init_albums:
         asyncio.run(initialize_albums())
         sys.exit()
 
-    if args.initialize_spotify:
-        asyncio.run(initialize_spotify())
-        sys.exit()
+    # if args.initialize_spotify:
+    #     asyncio.run(initialize_spotify())
+    #     sys.exit()
     
     asyncio.run(crawl())
     

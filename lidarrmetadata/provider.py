@@ -28,6 +28,7 @@ from lidarrmetadata import limit
 from lidarrmetadata import stats
 from lidarrmetadata import util
 from lidarrmetadata.cache import conn
+from lidarrmetadata.util import deprecated
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -146,8 +147,19 @@ class ArtistIdListMixin(MixinBase):
     Returns a list of all artist ids we should cache
     """
     
+    @deprecated('Use get_artist_ids_paged instead.')
     @abc.abstractmethod
     def get_all_artist_ids(self):
+        pass
+
+    @abc.abstractmethod
+    async def get_artist_ids_paged(self, limit=1000, offset=0):
+        """
+        Gets artist ids with pagination
+        :param limit: Number of results to return per page
+        :param offset: Number of results to skip
+        :return: List of artist ids for the requested page
+        """
         pass
 
 class ArtistNameSearchMixin(MixinBase):
@@ -1088,8 +1100,16 @@ class MusicbrainzDbProvider(Provider,
         # return results
         # return [{'mbid': item['gid'], 'spotifyid': item['spotifyid']} for item in results]
     
+    @deprecated('Use get_artist_ids_paged instead.')
     async def get_all_artist_ids(self):
         results = await self.query_from_file('all_artist_ids.sql')
+        return [item['gid'] for item in results]
+    
+    async def get_artist_ids_paged(self, limit=1000, offset=0):
+        """
+        实现分页获取艺术家 ID
+        """
+        results = await self.query_from_file('artist_ids_paged.sql', limit, offset)
         return [item['gid'] for item in results]
 
     @staticmethod

@@ -1,0 +1,4 @@
+SELECT DISTINCT artist.gid
+FROM artist
+LIMIT $1
+OFFSET $2;
