@@ -25,6 +25,7 @@ from lidarrmetadata import chart
 from lidarrmetadata import config
 from lidarrmetadata import provider
 from lidarrmetadata import util
+from lidarrmetadata.util import deprecated
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -199,7 +200,7 @@ async def refresh_artist_route(mbid):
     await invalidate_cloudflare([f'{base_url}/artist/{mbid}'])
     return jsonify(success=True)
 
-
+@deprecated("Use /release/<mbid> instead")
 @app.route('/album/<mbid>', methods=['GET'])
 async def get_release_group_info_route(mbid):
     
@@ -292,6 +293,7 @@ async def series_route(mbid):
     expiry = provider.utcnow() + timedelta(seconds=app.config['CACHE_TTL']['chart'])
     return await add_cache_control_header(jsonify(result), expiry)
 
+@deprecated('Use /search/release instead.')
 @app.route('/search/album')
 async def search_album():
     """Search for a human-readable album
@@ -324,6 +326,32 @@ async def search_album():
     albums, scores, validity = await get_album_search_results(query, limit, include_tracks, artist_name)
 
     return await add_cache_control_header(jsonify(albums), validity)
+
+@app.route('/search/release')
+async def search_release():
+    query = get_search_query()
+    artist_name = request.args.get('artist', '')
+    limit = request.args.get('limit', default=10, type=int)
+    limit = None if limit < 1 else limit
+    releases = await api.get_release_search_results(
+        query,
+        limit,
+        artist_name
+    )
+    if releases:
+        search_results = [{
+            'id': item['id'],
+            'title': item['title'],
+            'artistname': item['artistname'],
+            'image': item.get('image', None),
+            'type': item['type'],
+            'score': item['score'],
+        } for item in releases]
+        return jsonify({'results': search_results})
+    else:
+        return jsonify(error='No release search providers found'), 500
+
+
 
 async def get_album_search_results(query, limit, include_tracks, artist_name):
     search_providers = provider.get_providers_implementing(provider.AlbumNameSearchMixin)

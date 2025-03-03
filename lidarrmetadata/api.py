@@ -309,3 +309,27 @@ async def get_release_info(mbid):
     overview, _ = await get_overview(release['wiki_links'])
     release['overview'] = overview
     return release
+
+async def get_release_search_results(query, limit, artist_name):
+    search_providers = provider.get_providers_implementing(provider.ReleaseNameSearchMixin)
+    if search_providers:
+        search_results = await search_providers[0].search_release_name(query, artist_name=artist_name, limit=limit)
+        
+        if not search_results:
+            return []
+            
+        # 创建id到score的映射
+        score_map = {item['id']: item['score'] for item in search_results}
+        release_ids = list(score_map.keys())
+        
+        # 获取详细信息
+        release_provider = provider.get_providers_implementing(provider.ReleaseByIdMixin)[0]
+        releases = await release_provider.get_release_by_id(release_ids)
+        
+        for release in releases:
+            # 将score添加到对应的release中
+            release['score'] = score_map[release['id']]
+        
+        return releases
+    return []
+        

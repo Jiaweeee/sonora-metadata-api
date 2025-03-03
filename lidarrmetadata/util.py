@@ -6,7 +6,9 @@ import abc
 import time
 import logging
 
+import warnings
 import functools
+import inspect
 import redis
 from aiocache import caches
 from aiocache.backends.redis import RedisCache
@@ -93,3 +95,52 @@ class SentryRedisTtlProcessor(SentryProcessor):
             self.redis.set(self._KEY, "rate_limited", ex=self.ttl)
 
         return True
+
+def deprecated(reason):
+    """
+    带原因说明的废弃装饰器
+    可以用两种方式使用：
+    @deprecated("请使用其他函数") - 带原因
+    @deprecated - 不带原因
+    """
+    if isinstance(reason, str):
+        # 带原因使用装饰器的情况
+        def decorator(func):
+            if inspect.isclass(func):
+                fmt = "调用已废弃的类 {name} ({reason})."
+            else:
+                fmt = "调用已废弃的函数 {name} ({reason})."
+                
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                warnings.simplefilter('always', DeprecationWarning)
+                warnings.warn(
+                    fmt.format(name=func.__name__, reason=reason),
+                    category=DeprecationWarning,
+                    stacklevel=2
+                )
+                warnings.simplefilter('default', DeprecationWarning)
+                return func(*args, **kwargs)
+            return wrapper
+        return decorator
+    elif inspect.isclass(reason) or inspect.isfunction(reason):
+        # 不带原因直接使用装饰器的情况
+        func = reason
+        if inspect.isclass(func):
+            fmt = "调用已废弃的类 {name}."
+        else:
+            fmt = "调用已废弃的函数 {name}."
+            
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            warnings.simplefilter('always', DeprecationWarning)
+            warnings.warn(
+                fmt.format(name=func.__name__),
+                category=DeprecationWarning,
+                stacklevel=2
+            )
+            warnings.simplefilter('default', DeprecationWarning)
+            return func(*args, **kwargs)
+        return wrapper
+    else:
+        raise TypeError(repr(type(reason)))

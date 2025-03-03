@@ -354,6 +354,21 @@ class AlbumNameSearchMixin(MixinBase):
         """
         pass
 
+class ReleaseNameSearchMixin(MixinBase):
+    """
+    Searches for release by name
+    """
+    @abc.abstractmethod
+    def search_release_name(self, name, limit=None, artist_name=''):
+        """
+        Searches for release with name
+        :param name: Name of release
+        :param limit: Limit of number of results to return. Defaults to None, indicating no limit
+        :param artist_name: Artist name restriction
+        :return: List of releases
+        """
+        pass
+
 class DataVintageMixin(MixinBase):
     """
     Returns vintage of data in use
@@ -777,7 +792,8 @@ class SpotifyAuthProvider(HttpProvider,
         
 class SolrSearchProvider(HttpProvider,
                          ArtistNameSearchMixin,
-                         AlbumNameSearchMixin):
+                         AlbumNameSearchMixin,
+                         ReleaseNameSearchMixin):
     
     """
     Provider that uses a solr indexed search
@@ -863,7 +879,42 @@ class SolrSearchProvider(HttpProvider,
         
         return self.parse_album_search(response)
 
+    async def search_release_name(self, name, limit=None, artist_name=''):
+        url = u'{server}/release/select?wt=mbjson&q={query}'.format(
+            server=self._search_server,
+            query=url_quote(name.encode('utf-8'))
+        )
+        
+        if limit:
+            url += u'&rows={}'.format(limit)
+        logger.debug(f'search_release_name, url = {url}')
+
+        response = await self.get(url)
+        
+        if not response:
+            return {}
+        
+        return self.parse_release_search(response)
     
+    @staticmethod
+    def parse_release_search(response):
+        """
+        解析 release 搜索结果
+        :param response: Solr API 响应数据
+        :return: 标准化的 release 列表
+        """
+        if not 'count' in response or response['count'] == 0:
+            return []
+        
+        return [{
+            'id': result['id'],
+            'title': result['title'],
+            'releasedate': result.get('date', ''),
+            'artistname': result.get('artist-credit-phrase', ''),
+            'type': result.get('primary-type', 'Unknown'),
+            'score': result['score']
+        } for result in response['releases']]
+
     @staticmethod
     def escape_lucene_query(text):
         return re.sub(r'([+\-&|!(){}\[\]\^"~*?:\\/])', r'\\\1', text)
@@ -1114,11 +1165,11 @@ class MusicbrainzDbProvider(Provider,
         for release_data in releases:
             release = json.loads(release_data['release'])    
             # 处理 release group 信息
-            if 'releasegroup' in release:
+            if release.get('releasegroup'):
                 release_group = release['releasegroup']
                 release['type'] = release_group['Type']
                 # 提取 wiki 相关链接
-                if 'Links' in release_group:
+                if release_group.get('Links'):
                     wiki_links = [
                         link for link in release_group['Links'] 
                         if any(wiki in link['type'].lower() for wiki in ['wikidata', 'wikipedia'])
@@ -1127,7 +1178,7 @@ class MusicbrainzDbProvider(Provider,
                         release['wiki_links'] = wiki_links
                 del release['releasegroup']
             # 处理 cover art
-            if 'images' in release:
+            if release.get('images'):
                 image = release['images'][0] if len(release['images']) > 0 else None
                 url = self._build_caa_url(release['id'], image['id'], size=250) if image else None
                 release['image'] = url
