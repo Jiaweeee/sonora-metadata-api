@@ -73,7 +73,7 @@ SELECT
         ),
         'release', json_build_object(
             'id', r.gid,
-            'name', r.name
+            'title', r.name
         )
     ) as track
 FROM track t
