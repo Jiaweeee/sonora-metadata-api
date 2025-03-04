@@ -282,6 +282,19 @@ class ReleaseByIdMixin(MixinBase):
         """
         pass
 
+class TrackByIdMixin(MixinBase):
+    """
+    Gets track by ID
+    """
+    @abc.abstractmethod
+    def get_track_by_id(self, track_ids):
+        """
+        Gets track by ID
+        :param track_ids: List of track IDs
+        :return: Track corresponding to track_id
+        """
+        pass
+
 class SeriesMixin(MixinBase):
     """
     Musicbrainz series
@@ -967,6 +980,7 @@ class MusicbrainzDbProvider(Provider,
                             ReleaseGroupByIdMixin,
                             ReleaseGroupIdListMixin,
                             ReleaseByIdMixin,
+                            TrackByIdMixin,
                             SeriesMixin):
     """
     Provider for directly querying musicbrainz database
@@ -1206,6 +1220,22 @@ class MusicbrainzDbProvider(Provider,
             results.append(release)
         return results
     
+    async def get_track_by_id(self, track_ids):
+        """
+        获取曲目信息
+        """
+        tracks = await self.query_from_file('track_by_id.sql', track_ids)
+        
+        if not tracks:
+            return None
+            
+        results = []
+        for track_data in tracks:
+            track = json.loads(track_data['track'])
+            results.append(track)
+            
+        return results
+
     async def get_release_groups_by_recording_ids(self, rids):
         results = await self.query_from_file('release_group_by_recording_ids.sql', len(rids), rids)
 

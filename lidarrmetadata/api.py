@@ -279,20 +279,7 @@ async def get_release_info_basic(mbid):
     for release in releases:
         # 提取 streaming links
         if 'links' in release:
-            streaming_links = []
-            for link in release['links']:
-                if 'streaming' in link['type']:
-                    url = link['url'].lower()
-                    if 'spotify' in url:
-                        streaming_links.append({
-                            'source': 'spotify',
-                            'url': link['url']
-                        })
-                    elif 'music.apple' in url:
-                        streaming_links.append({
-                            'source': 'apple_music',
-                            'url': link['url']
-                        })
+            streaming_links = get_streaming_links(release['links'])
             if streaming_links:
                 release['streaming_links'] = streaming_links
         # 删除无用字段
@@ -303,6 +290,28 @@ async def get_release_info_basic(mbid):
         if 'status' in release:
             del release['status']
     return releases[0]
+
+def get_streaming_links(links):
+    """
+    从链接列表中提取流媒体服务的链接
+    :param links: 链接列表
+    :return: 流媒体服务的链接列表。当前只支持 Spotify 和 Apple Music
+    """
+    streaming_links = []
+    for link in links:
+        if 'streaming' in link['type']:
+            url = link['url'].lower()
+            if 'spotify' in url:
+                streaming_links.append({
+                    'source': 'spotify',
+                    'url': link['url']
+                })
+            elif 'music.apple' in url:
+                streaming_links.append({
+                    'source': 'apple_music',
+                    'url': link['url']
+                })
+    return streaming_links if streaming_links else None
 
 async def get_release_info(mbid):
     release = await get_release_info_basic(mbid)
@@ -333,3 +342,31 @@ async def get_release_search_results(query, limit, artist_name):
         return releases
     return []
         
+
+class TrackNotFoundException(Exception):
+    def __init__(self, mbid):
+        super().__init__(f"Track not found: {mbid}")
+        self.mbid = mbid
+
+async def get_track_info(mbid):
+    """
+    获取曲目详细信息
+    """
+    track_provider = provider.get_providers_implementing(provider.TrackByIdMixin)[0]
+    tracks = await track_provider.get_track_by_id([mbid])
+    
+    if not tracks or len(tracks) == 0:
+        raise TrackNotFoundException(mbid)
+    
+    track = tracks[0]
+    # 提取流媒体 links
+    if 'urls' in track:
+        streaming_links = get_streaming_links(track['urls'])
+        if streaming_links:
+            track['streaming_links'] = streaming_links
+            del track['urls']
+    release_id = track['release']['id']
+    # 获取专辑信息 TODO: use cache
+    release = await get_release_info_basic(release_id)
+    track['release']['image'] = release['image']
+    return track
