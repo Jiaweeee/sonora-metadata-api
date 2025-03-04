@@ -236,6 +236,31 @@ async def get_track_info_route(mbid):
     track = await api.get_track_info(mbid)
     return jsonify(track)
 
+@app.route('/search/track')
+async def search_track():
+    """
+    搜索曲目
+    支持参数:
+    - query: 搜索关键词(必需)
+    - artist: 艺术家名称(可选)
+    - limit: 返回结果数量限制(可选,默认10)
+    """
+    query = get_search_query()
+    artist_name = request.args.get('artist', '')
+    limit = request.args.get('limit', default=10, type=int)
+    limit = None if limit < 1 else limit
+        
+    results = await api.get_track_search_results(
+        query,
+        limit=limit,
+        artist_name=artist_name
+    )
+    
+    if results:
+        return jsonify({'results': results})
+    else:
+        return jsonify({'results': []})
+
 @app.route('/album/<mbid>/refresh', methods=['POST'])
 async def refresh_release_group_route(mbid):
     uuid_validation_response = validate_mbid(mbid)

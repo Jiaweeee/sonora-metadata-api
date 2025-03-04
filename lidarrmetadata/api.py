@@ -297,6 +297,8 @@ def get_streaming_links(links):
     :param links: 链接列表
     :return: 流媒体服务的链接列表。当前只支持 Spotify 和 Apple Music
     """
+    if not links:
+        return None
     streaming_links = []
     for link in links:
         if 'streaming' in link['type']:
@@ -370,3 +372,60 @@ async def get_track_info(mbid):
     release = await get_release_info_basic(release_id)
     track['release']['image'] = release['image']
     return track
+
+async def get_track_search_results(query, limit, artist_name):
+    search_providers = provider.get_providers_implementing(provider.RecordingNameSearchMixin)
+    if search_providers:
+        recording_results = await search_providers[0].search_recording_name(
+            query,
+            limit,
+            artist_name
+        )
+        if not recording_results:
+            return []
+            
+        recordings = recording_results['recordings']
+        tracks = []
+        release_ids = set()  # 使用 set 去重
+        
+        # 先收集所有的 release_id 和构建基础 track 信息
+        track_map = {}  # release_id 到 track 的映射
+        for recording in recordings:
+            # 检查 recording 是否包含 releases
+            if 'releases' not in recording:
+                continue
+            for release in recording['releases']:
+                if 'media' not in release:
+                    continue
+                    
+                track_id = release['media'][0]['track'][0].get('id', None)
+                if not track_id:
+                    continue
+                    
+                track = {
+                    'id': track_id,
+                    'title': recording['title'],
+                    'score': recording['score'],
+                }
+                
+                if 'artist-credit' in recording:
+                    track['artists'] = [artist['name'] for artist in recording['artist-credit']]
+                
+                release_ids.add(release['id'])
+                track_map[release['id']] = track
+        
+        # 批量获取 release 信息
+        if release_ids:
+            release_provider = provider.get_providers_implementing(provider.ReleaseByIdMixin)[0]
+            releases = await release_provider.get_release_by_id(list(release_ids))
+            
+            # 将 image 信息添加到对应的 track 中
+            for release in releases:
+                if release['id'] in track_map and 'image' in release:
+                    track_map[release['id']]['image'] = release['image']
+            
+            # 构建最终的 tracks 列表
+            tracks = list(track_map.values())
+            
+        return tracks
+    return []

@@ -394,6 +394,21 @@ class ReleaseNameSearchMixin(MixinBase):
         """
         pass
 
+class RecordingNameSearchMixin(MixinBase):
+    """
+    Searches for recording by name
+    """
+    @abc.abstractmethod
+    def search_recording_name(self, name, limit=None, artist_name=''):
+        """
+        Searches for recording with name
+        :param name: Name of recording
+        :param limit: Limit of number of results to return. Defaults to None, indicating no limit
+        :param artist_name: Artist name restriction
+        :return: List of recordings
+        """
+        pass
+
 class DataVintageMixin(MixinBase):
     """
     Returns vintage of data in use
@@ -818,7 +833,8 @@ class SpotifyAuthProvider(HttpProvider,
 class SolrSearchProvider(HttpProvider,
                          ArtistNameSearchMixin,
                          AlbumNameSearchMixin,
-                         ReleaseNameSearchMixin):
+                         ReleaseNameSearchMixin,
+                         RecordingNameSearchMixin):
     
     """
     Provider that uses a solr indexed search
@@ -921,6 +937,38 @@ class SolrSearchProvider(HttpProvider,
         
         return self.parse_release_search(response)
     
+    async def search_recording_name(self, name, limit=None, artist_name=''):
+        """
+        搜索录音作品
+        :param name: 录音作品名称
+        :param limit: 返回结果数量限制,默认为 None 表示无限制
+        :param artist_name: 艺术家名称限制
+        :return: 录音作品列表
+        """
+        if artist_name:
+            query = f"({self.escape_lucene_query(name)}) AND (artist:{self.escape_lucene_query(artist_name)} OR artistname:{self.escape_lucene_query(artist_name)} OR creditname:{self.escape_lucene_query(artist_name)})"
+            url = u'{server}/recording/advanced?wt=mbjson&q={query}'.format(
+                server=self._search_server,
+                query=url_quote(query.encode('utf-8'))
+            )
+        else:
+            url = u'{server}/recording/select?wt=mbjson&q={query}'.format(
+                server=self._search_server,
+                query=url_quote(name.encode('utf-8'))
+            )
+        
+        if limit:
+            url += u'&rows={}'.format(limit)
+            
+        logger.debug(f'search_recording_name, url = {url}')
+        
+        response = await self.get(url)
+        
+        if not response:
+            return {}
+        
+        return response
+
     @staticmethod
     def parse_release_search(response):
         """
