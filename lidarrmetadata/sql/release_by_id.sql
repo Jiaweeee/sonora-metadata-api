@@ -12,15 +12,6 @@ WITH release_info AS (
     -- 添加 artist 信息
     artist.gid as ArtistId,
     artist.name as ArtistName,
-    -- 添加 cover art archive 信息
-    array(
-      SELECT json_build_object(
-        'id', index_listing.id
-      )
-      FROM cover_art_archive.index_listing
-      WHERE index_listing.release = release.id
-      ORDER BY index_listing.id
-    ) as images,
     -- 添加 link 信息
     array(
       SELECT json_build_object(

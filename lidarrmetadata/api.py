@@ -81,12 +81,16 @@ def postgres_cache(cache):
 
             cached, expiry = await cache.get(mbid)
             if cached and expiry > now:
+                logger.debug(f"Cache hit for {mbid} in {cache.__class__.__name__}")
                 return cached, expiry
             
             result, expiry = await function(*args, **kwargs)
-            ttl = (expiry - now).total_seconds()
             
-            await cache.set(mbid, result, ttl=ttl)
+            # 只有当结果不为 None 时才缓存
+            if result is not None:
+                ttl = (expiry - now).total_seconds()
+                await cache.set(mbid, result, ttl=ttl)
+                
             return result, expiry
 
         wrapper.__cache__ = cache
@@ -276,6 +280,10 @@ async def get_release_group_info(mbid):
 async def get_release_info_basic(mbid):
     release_provider = provider.get_providers_implementing(provider.ReleaseByIdMixin)[0]
     releases = await release_provider.get_release_by_id([mbid])
+    
+    if not releases:
+        return None
+    
     for release in releases:
         # 提取 streaming links
         if 'links' in release:
@@ -315,11 +323,34 @@ def get_streaming_links(links):
                 })
     return streaming_links if streaming_links else None
 
+async def get_release_images(mbid):
+    image_provider = provider.get_providers_implementing(provider.ReleaseArtworkMixin)[0]
+    return await image_provider.get_release_images(mbid)
+
+
+class ReleaseNotFoundException(Exception):
+    def __init__(self, mbid):
+        super().__init__(f"Release not found: {mbid}")
+        self.mbid = mbid
+
+@postgres_cache(util.RELEASE_CACHE)
 async def get_release_info(mbid):
     release = await get_release_info_basic(mbid)
-    overview, _ = await get_overview(release['wiki_links'])
+    if not release:
+        return None, provider.utcnow()
+    
+    # Get overview
+    overview, overview_expiry = await get_overview(release.get('wiki_links', []))
     release['overview'] = overview
-    return release
+    
+    # Get images
+    images, image_expiry = await get_release_images(mbid)
+    release['images'] = images
+
+    # Use the earliest expiry
+    expiry = provider.utcnow() + timedelta(seconds = CONFIG.CACHE_TTL['release'])
+    expiry = min(expiry, overview_expiry, image_expiry)
+    return release, expiry
 
 async def get_release_search_results(query, limit, artist_name):
     search_providers = provider.get_providers_implementing(provider.ReleaseNameSearchMixin)

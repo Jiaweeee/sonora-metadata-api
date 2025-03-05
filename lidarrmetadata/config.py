@@ -292,6 +292,9 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     # there was enough information to return a useful response
     # (e.g. we are missing overviews or images)
     DAYS = 60 * 60 * 24
+    WEEKS = 7 * DAYS
+    MONTHS = 30 * DAYS
+    YEARS = 365 * DAYS
     
     USE_CACHE = True
     CACHE_TTL = {
@@ -301,7 +304,9 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
         'provider_error': 60 * 30,
         'redis': DAYS * 7,
         'fanart': DAYS * 30,
-        'wikipedia': DAYS * 7
+        'wikipedia': DAYS * 7,
+        'release_image': MONTHS * 3,
+        'release': MONTHS * 3,
     }
     
     CACHE_CONFIG = {
@@ -348,7 +353,21 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
             'port': POSTGRES_CACHE_PORT,
             'db_table': 'spotify',
             'timeout': 0,
-        }
+        },
+        'release_image': {
+            'cache': 'lidarrmetadata.cache.PostgresCache',
+            'endpoint': POSTGRES_CACHE_HOST,
+            'port': POSTGRES_CACHE_PORT,
+            'db_table': 'release_image',
+            'timeout': 0,
+        },
+        'release': {
+            'cache': 'lidarrmetadata.cache.PostgresCache',
+            'endpoint': POSTGRES_CACHE_HOST,
+            'port': POSTGRES_CACHE_PORT,
+            'db_table': 'release',
+            'timeout': 0,
+        },
     }
 
     CRAWLER_BATCH_SIZE = {
@@ -392,6 +411,18 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
             'serializer': {
                 'class': 'lidarrmetadata.cache.ExpirySerializer'
             }
+        },
+        'release_image': {
+            'cache': 'lidarrmetadata.cache.NullCache',
+            'serializer': {
+                'class': 'lidarrmetadata.cache.ExpirySerializer'
+            }
+        },
+        'release': {
+            'cache': 'lidarrmetadata.cache.NullCache',
+            'serializer': {
+                'class': 'lidarrmetadata.cache.ExpirySerializer'
+            }
         }
     }
     
@@ -409,7 +440,7 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     # Rate limit time delta in ms
     EXTERNAL_LIMIT_TIME_DELTA = 1000
     # Request timeout in ms
-    EXTERNAL_TIMEOUT = 2000
+    EXTERNAL_TIMEOUT = 5000
 
     # Redis db if using RedisRateLimiter
     EXTERNAL_LIMIT_REDIS_DB = 10
@@ -419,7 +450,7 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     EXTERNAL_LIMIT_REDIS_PORT = REDIS_PORT
 
     # Fanart.tv API credentials
-    FANART_KEY = 'e730454add1a72eed2bcc4dbc73d9775' #TODO
+    FANART_KEY = 'e730454add1a72eed2bcc4dbc73d9775'
     # The API for standard keys is supposed to be delayed by 7 days but
     # in practise it appears the lag is slightly more
     FANART_API_DELAY_SECONDS = 8 * 24 * 60 * 60
@@ -433,8 +464,8 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
 
     # Spotify app details
     SPOTIFY_REDIRECT_URL = ''
-    SPOTIFY_ID = 'replaceme'
-    SPOTIFY_SECRET = 'replaceme'
+    SPOTIFY_ID = '79348a07abd949208d0def2be6adb27b'
+    SPOTIFY_SECRET = '44d20758f4b441119636008532822fcc'
     SPOTIFY_MATCH_MIN_RATIO = 0.8
 
     # Whether or not running in production
@@ -452,7 +483,8 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
         'FANARTTVPROVIDER': ([FANART_KEY], {}),
         'WIKIPEDIAPROVIDER': ([], {}),
         'SPOTIFYAUTHPROVIDER': ([], {'CLIENT_ID': SPOTIFY_ID, 'CLIENT_SECRET': SPOTIFY_SECRET, 'REDIRECT_URI': SPOTIFY_REDIRECT_URL}),
-        'SPOTIFYPROVIDER': ([], {'CLIENT_ID': SPOTIFY_ID, 'CLIENT_SECRET': SPOTIFY_SECRET})
+        'SPOTIFYPROVIDER': ([], {'CLIENT_ID': SPOTIFY_ID, 'CLIENT_SECRET': SPOTIFY_SECRET}),
+        'COVERARTARCHIVEPROVIDER': ([], {}),
     }
 
     # Connection info for sentry. Defaults to None, in which case Sentry won't be used

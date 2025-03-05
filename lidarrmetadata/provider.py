@@ -162,6 +162,46 @@ class ArtistIdListMixin(MixinBase):
         """
         pass
 
+class MusicBrainzCoverArtMixin(MixinBase):
+    """
+    从 MusicBrainz 数据库获取 Cover Art Archive 的封面信息。
+    
+    Cover Art Archive 是 MusicBrainz 的官方封面数据库,存储了专辑发行版和专辑组的封面图片。
+    该 Mixin 通过查询 MusicBrainz 数据库获取封面信息,包括:
+    - 封面图片 ID
+    - 封面类型(前封面、后封面、CD等)
+    - 图片尺寸
+    - 上传时间等元数据
+    """
+
+    @abc.abstractmethod
+    async def get_release_cover_art(self, release_id):
+        """
+        获取发行版(Release)的封面信息
+        
+        :param release_id: MusicBrainz Release ID (UUID格式)
+        :return: 封面信息列表,每个元素包含:
+            {
+                'id': 封面图片ID,
+                'type': 封面类型(front/back/medium等),
+                'approved': 是否已审核通过,
+                'edit': 最后编辑ID,
+                'comment': 备注信息,
+                'uploaded': 上传时间
+            }
+        """
+        pass
+
+    @abc.abstractmethod  
+    async def get_release_group_cover_art(self, release_group_id):
+        """
+        获取专辑组(Release Group)的封面信息
+        
+        :param release_group_id: MusicBrainz Release Group ID (UUID格式)
+        :return: 封面信息列表,格式同 get_release_cover_art 的返回值
+        """
+        pass
+
 class ArtistNameSearchMixin(MixinBase):
     """
     Searches for artist with artist name
@@ -359,6 +399,25 @@ class AlbumArtworkMixin(MixinBase):
         Gets images for album with ID
         :param album_id: ID of album
         :return: List of results
+        """
+        pass
+
+class ReleaseArtworkMixin(MixinBase):
+    """
+    Gets art for release
+    """
+    @abc.abstractmethod
+    def get_release_images(self, release_id):
+        """
+        Gets images for release with ID
+        :param release_id: ID of release
+        :return: image links for release with different qualities, e.g.
+        {
+            'small': 'http://xxx',
+            'mid': 'http://xxx',
+            'large': 'http://xxx',
+            'original': 'http://xxx'
+        }
         """
         pass
 
@@ -588,6 +647,64 @@ class HttpProvider(Provider,
         except limit.RateLimitedError:
             logger.debug(f'{self._name} request rate limited')
             self._count_request('ratelimit')
+
+class CoverArtArchiveProvider(Provider, ReleaseArtworkMixin):
+    """
+    从 Cover Art Archive 获取专辑封面的 Provider
+    """
+    def __init__(self):
+        """
+        初始化 Provider
+        """
+        super(CoverArtArchiveProvider, self).__init__()
+        self._db_provider = get_providers_implementing(MusicBrainzCoverArtMixin)[0]
+        self._base_url = 'http://coverartarchive.org/release/'
+        
+    async def get_release_images(self, release_id):
+        """
+        获取专辑封面
+        :param album_id: MusicBrainz Release ID
+        :return: 封面信息列表
+        """
+        now = utcnow()
+        cached, expires = await util.RELEASE_IMAGE_CACHE.get(release_id) or (None, True)
+        
+        if cached and expires > now:
+            logger.debug(f'Using cached cover art for {release_id}')
+            return cached, expires
+            
+        try:
+            cover_art_data = await self._db_provider.get_release_cover_art(release_id)
+            if not cover_art_data or 'id' not in cover_art_data:
+                logger.debug(f'No cover art data found for {release_id}')
+                return None, now
+            
+            image_id = cover_art_data['id']
+            images = {
+                'small': self._build_caa_url(release_id, image_id, size=250),
+                'mid': self._build_caa_url(release_id, image_id, size=500),
+                'large': self._build_caa_url(release_id, image_id, size=1200),
+                'original': self._build_caa_url(release_id, image_id)
+            }
+            ttl = CONFIG.CACHE_TTL['release_image']
+            await util.RELEASE_IMAGE_CACHE.set(release_id, images, ttl=ttl)
+            logger.debug(f'Got cover art for {release_id}')
+            return images, now + timedelta(seconds=ttl)
+            
+        except ProviderUnavailableException:
+            return (cached or [], now + timedelta(seconds=CONFIG.CACHE_TTL['provider_error']))
+            
+
+    @staticmethod
+    def _build_caa_url(release_id, image_id, size=None):
+        """
+        Builds the cover art archive url for a given release and image id
+        :param release_id: Musicbrainz release id
+        :param image_id: Cover Art Archive image id 
+        :param size: Size of image to return. Should be one of: 250, 500, 1200 or None.
+        """
+        base_url = f'http://coverartarchive.org/release/{release_id}/{image_id}'
+        return f'{base_url}-{size}.jpg' if size else f'{base_url}.jpg'
 
 class FanArtTvProvider(HttpProvider, 
                        AlbumArtworkMixin, 
@@ -1029,6 +1146,7 @@ class MusicbrainzDbProvider(Provider,
                             ReleaseGroupIdListMixin,
                             ReleaseByIdMixin,
                             TrackByIdMixin,
+                            MusicBrainzCoverArtMixin,
                             SeriesMixin):
     """
     Provider for directly querying musicbrainz database
@@ -1175,14 +1293,15 @@ class MusicbrainzDbProvider(Provider,
         return [item['gid'] for item in results]
 
     @staticmethod
-    def _build_caa_url(release_id, image_id, size=1200):
+    def _build_caa_url(release_id, image_id, size=None):
         """
         Builds the cover art archive url for a given release and image id
         :param release_id: Musicbrainz release id
-        :param image_id: Musicbrainz image id
-        :param size: Size of image to return. Should be one of: 250, 500, 1200
+        :param image_id: Cover Art Archive image id 
+        :param size: Size of image to return. Should be one of: 250, 500, 1200 or None.
         """
-        return 'https://imagecache.lidarr.audio/v1/caa/{}/{}-{}.jpg'.format(release_id, image_id, size)
+        base_url = f'http://coverartarchive.org/release/{release_id}/{image_id}'
+        return f'{base_url}-{size}.jpg' if size else f'{base_url}.jpg'
     
     @classmethod
     def _load_artist(cls, data):
@@ -1259,12 +1378,6 @@ class MusicbrainzDbProvider(Provider,
                     if wiki_links:
                         release['wiki_links'] = wiki_links
                 del release['releasegroup']
-            # 处理 cover art
-            if release.get('images'):
-                image = release['images'][0] if len(release['images']) > 0 else None
-                url = self._build_caa_url(release['id'], image['id'], size=250) if image else None
-                release['image'] = url
-                del release['images']
             results.append(release)
         return results
     
@@ -1322,6 +1435,33 @@ class MusicbrainzDbProvider(Provider,
         series = await self.query_from_file('release_group_series.sql', mbid)
         return [json.loads(x['item']) for x in series]
     
+    async def get_release_cover_art(self, release_id):
+        """
+        从 MusicBrainz 数据库获取发行版的封面信息
+        返回最新的正面封面
+        """
+        results = await self.query_from_file('release_cover_art.sql', release_id)
+        
+        if not results:
+            return None
+        
+        return results[0]
+
+    async def get_release_group_cover_art(self, release_group_id):
+        """
+        从 MusicBrainz 数据库获取专辑组的封面信息
+        
+        通过查找专辑组下的第一个发行版的封面作为专辑组的封面
+        """
+        results = await self.query_from_file('release_group_latest_release_with_cover.sql', release_group_id)
+        
+        if not results:
+            return []
+            
+        # 使用第一个发行版的封面
+        release_id = results[0]['release_id']
+        return await self.get_release_cover_art(release_id)
+
     async def query_from_file(self, sql_file, *args):
         """
         Executes query from sql file

@@ -106,6 +106,7 @@ def handle_error(e):
 async def handle_http_error(e):
     return jsonify(error = e.description), e.status_code
 
+@deprecated
 @app.errorhandler(api.ReleaseGroupNotFoundException)
 async def handle_error(e):
     return jsonify(error='Album not found'), 404
@@ -113,6 +114,14 @@ async def handle_error(e):
 @app.errorhandler(api.ArtistNotFoundException)
 async def handle_error(e):
     return jsonify(error='Artist not found'), 404
+
+@app.errorhandler(api.ReleaseNotFoundException)
+async def handle_error(e):
+    return jsonify(error='Release not found'), 404
+
+@app.errorhandler(api.TrackNotFoundException)
+async def handle_error(e):
+    return jsonify(error='Track not found'), 404
 
 @app.errorhandler(redis.ConnectionError)
 def handle_error(e):
@@ -217,12 +226,8 @@ async def get_release_info_route(mbid):
     uuid_validation_response = validate_mbid(mbid)
     if uuid_validation_response:
         return uuid_validation_response
-    output = await api.get_release_info(mbid)
+    output, _ = await api.get_release_info(mbid)
     return jsonify(output)
-
-@app.errorhandler(api.TrackNotFoundException)
-async def handle_error(e):
-    return jsonify(error='Track not found'), 404
 
 @app.route('/track/<mbid>', methods=['GET'])
 async def get_track_info_route(mbid):
