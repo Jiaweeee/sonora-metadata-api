@@ -472,15 +472,16 @@ async def get_track_search_results(query, limit, artist_name):
                 release_ids.add(release['id'])
                 track_map[release['id']] = track
         
-        # 批量获取 release 信息
+        # 批量获取图片
         if release_ids:
-            release_provider = provider.get_providers_implementing(provider.ReleaseByIdMixin)[0]
-            releases = await release_provider.get_release_by_id(list(release_ids))
+            art_provider = provider.get_providers_implementing(provider.ReleaseArtworkMixin)[0]
+            image_results = await art_provider.get_release_images_multi(list(release_ids))
             
-            # 将 image 信息添加到对应的 track 中
-            for release in releases:
-                if release['id'] in track_map and 'image' in release:
-                    track_map[release['id']]['image'] = release['image']
+            # 将图片信息添加到对应的 track 中
+            for i, release_id in enumerate(release_ids):
+                images, _ = image_results[i]
+                if images and release_id in track_map:
+                    track_map[release_id]['images'] = images
             
             # 构建最终的 tracks 列表
             tracks = list(track_map.values())
