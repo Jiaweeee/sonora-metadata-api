@@ -307,6 +307,7 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
         'wikipedia': DAYS * 7,
         'release_image': MONTHS * 3,
         'release': MONTHS * 3,
+        'track': MONTHS * 3,
     }
     
     CACHE_CONFIG = {
@@ -368,6 +369,13 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
             'db_table': 'release',
             'timeout': 0,
         },
+        'track': {
+            'cache': 'lidarrmetadata.cache.PostgresCache',
+            'endpoint': POSTGRES_CACHE_HOST,
+            'port': POSTGRES_CACHE_PORT,
+            'db_table': 'track',
+            'timeout': 0,
+        },
     }
 
     CRAWLER_BATCH_SIZE = {
@@ -419,6 +427,12 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
             }
         },
         'release': {
+            'cache': 'lidarrmetadata.cache.NullCache',
+            'serializer': {
+                'class': 'lidarrmetadata.cache.ExpirySerializer'
+            }
+        },
+        'track': {
             'cache': 'lidarrmetadata.cache.NullCache',
             'serializer': {
                 'class': 'lidarrmetadata.cache.ExpirySerializer'

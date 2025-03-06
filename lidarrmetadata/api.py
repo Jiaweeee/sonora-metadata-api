@@ -401,6 +401,7 @@ class TrackNotFoundException(Exception):
         super().__init__(f"Track not found: {mbid}")
         self.mbid = mbid
 
+@postgres_cache(util.TRACK_CACHE)
 async def get_track_info(mbid):
     """
     获取曲目详细信息
@@ -418,11 +419,17 @@ async def get_track_info(mbid):
         if streaming_links:
             track['streaming_links'] = streaming_links
             del track['urls']
+    
+    # 获取 release image
     release_id = track['release']['id']
-    # 获取专辑信息 TODO: use cache
-    release = await get_release_info_basic(release_id)
-    track['release']['image'] = release['image']
-    return track
+    release_images, image_expiry = await get_release_images(release_id)  # Unpack the tuple, ignoring expiry
+    track['release']['images'] = release_images
+
+    # Use the earlist expiry
+    expiry = provider.utcnow() + timedelta(seconds = CONFIG.CACHE_TTL['track'])
+    expiry = min(expiry, image_expiry)
+
+    return track, expiry
 
 async def get_track_search_results(query, limit, artist_name):
     search_providers = provider.get_providers_implementing(provider.RecordingNameSearchMixin)

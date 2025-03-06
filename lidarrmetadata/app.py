@@ -226,8 +226,8 @@ async def get_release_info_route(mbid):
     uuid_validation_response = validate_mbid(mbid)
     if uuid_validation_response:
         return uuid_validation_response
-    output, _ = await api.get_release_info(mbid)
-    return jsonify(output)
+    release, _ = await api.get_release_info(mbid)
+    return jsonify(release)
 
 @app.route('/track/<mbid>', methods=['GET'])
 async def get_track_info_route(mbid):
@@ -238,7 +238,7 @@ async def get_track_info_route(mbid):
     if uuid_validation_response:
         return uuid_validation_response
         
-    track = await api.get_track_info(mbid)
+    track, _ = await api.get_track_info(mbid)
     return jsonify(track)
 
 @app.route('/search/track')
