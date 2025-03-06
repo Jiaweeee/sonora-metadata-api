@@ -4,6 +4,7 @@ SELECT
     SELECT
       artist.gid AS id,
       artist.name as artist_name,
+      area.name as area_name,
       json_build_object(
         'begin', CASE 
           WHEN artist.begin_date_year IS NOT NULL 
@@ -38,5 +39,6 @@ SELECT
            AND artist_tag.count > 0
       ) AS genres
       FROM artist
+      LEFT JOIN area ON artist.area = area.id
      WHERE artist.gid = ANY($1::uuid[])
   ) artist_data
