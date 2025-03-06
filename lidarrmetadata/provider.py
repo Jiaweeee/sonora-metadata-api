@@ -175,12 +175,13 @@ class MusicBrainzCoverArtMixin(MixinBase):
     """
 
     @abc.abstractmethod
-    async def get_release_cover_art(self, release_id):
+    async def get_release_cover_art(self, release_ids):
         """
-        获取发行版(Release)的封面信息
+        获取一个或多个发行版(Release)的封面信息
         
-        :param release_id: MusicBrainz Release ID (UUID格式)
-        :return: 封面信息列表,每个元素包含:
+        :param release_ids: 单个 MusicBrainz Release ID 或 ID 列表
+        :return: 如果传入单个 ID，返回单个封面信息；如果传入 ID 列表，返回字典 {release_id: cover_art_data}
+            cover_art_data 包含:
             {
                 'id': 封面图片ID,
                 'type': 封面类型(front/back/medium等),
@@ -189,16 +190,6 @@ class MusicBrainzCoverArtMixin(MixinBase):
                 'comment': 备注信息,
                 'uploaded': 上传时间
             }
-        """
-        pass
-
-    @abc.abstractmethod  
-    async def get_release_group_cover_art(self, release_group_id):
-        """
-        获取专辑组(Release Group)的封面信息
-        
-        :param release_group_id: MusicBrainz Release Group ID (UUID格式)
-        :return: 封面信息列表,格式同 get_release_cover_art 的返回值
         """
         pass
 
@@ -412,6 +403,21 @@ class ReleaseArtworkMixin(MixinBase):
         Gets images for release with ID
         :param release_id: ID of release
         :return: image links for release with different qualities, e.g.
+        {
+            'small': 'http://xxx',
+            'mid': 'http://xxx',
+            'large': 'http://xxx',
+            'original': 'http://xxx'
+        }
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_release_images_multi(self, release_ids):
+        """
+        Gets images for multiple releases with IDs
+        :param release_ids: List of release IDs
+        :return: List of tuples (images, expiry) where images is a dict of image links with different qualities:
         {
             'small': 'http://xxx',
             'mid': 'http://xxx',
@@ -662,38 +668,83 @@ class CoverArtArchiveProvider(Provider, ReleaseArtworkMixin):
         
     async def get_release_images(self, release_id):
         """
-        获取专辑封面
-        :param album_id: MusicBrainz Release ID
-        :return: 封面信息列表
+        获取单个专辑封面
+        :param release_id: MusicBrainz Release ID
+        :return: (images, expiry) 元组，其中 images 包含不同尺寸的图片 URL
+        """
+        results = await self.get_release_images_multi([release_id])
+        return results[0] if results else (None, utcnow())
+
+    async def get_release_images_multi(self, release_ids):
+        """
+        批量获取多个专辑的封面
+        :param release_ids: MusicBrainz Release ID 列表
+        :return: 封面信息列表的列表
         """
         now = utcnow()
-        cached, expires = await util.RELEASE_IMAGE_CACHE.get(release_id) or (None, True)
         
-        if cached and expires > now:
-            logger.debug(f'Using cached cover art for {release_id}')
-            return cached, expires
+        # 先检查缓存
+        cached_results = await asyncio.gather(*[util.RELEASE_IMAGE_CACHE.get(rid) for rid in release_ids])
+        results = []
+        uncached_ids = []
+        uncached_indices = {}  # 使用字典来保存 release_id 到结果索引的映射
+        
+        # 处理缓存结果
+        for i, (cached, expires) in enumerate(cached_results):
+            if cached and expires > now:
+                results.append((cached, expires))
+            else:
+                results.append(None)
+                rid = release_ids[i]
+                uncached_ids.append(rid)
+                uncached_indices[rid] = i
+                
+        if not uncached_ids:
+            return results
             
         try:
-            cover_art_data = await self._db_provider.get_release_cover_art(release_id)
-            if not cover_art_data or 'id' not in cover_art_data:
-                logger.debug(f'No cover art data found for {release_id}')
-                return None, now
+            # 批量获取未缓存的封面
+            cover_art_data_dict = await self._db_provider.get_release_cover_art(uncached_ids)
             
-            image_id = cover_art_data['id']
-            images = {
-                'small': self._build_caa_url(release_id, image_id, size=250),
-                'mid': self._build_caa_url(release_id, image_id, size=500),
-                'large': self._build_caa_url(release_id, image_id, size=1200),
-                'original': self._build_caa_url(release_id, image_id)
-            }
             ttl = CONFIG.CACHE_TTL['release_image']
-            await util.RELEASE_IMAGE_CACHE.set(release_id, images, ttl=ttl)
-            logger.debug(f'Got cover art for {release_id}')
-            return images, now + timedelta(seconds=ttl)
+            expiry = now + timedelta(seconds=ttl)
+            
+            # 处理每个未缓存的结果
+            for release_id in uncached_ids:
+                result_index = uncached_indices[release_id]
+                
+                # 如果没有找到任何封面数据，或者这个 release_id 没有对应的封面
+                if not cover_art_data_dict or release_id not in cover_art_data_dict:
+                    logger.debug(f'No cover art data found for {release_id}')
+                    results[result_index] = (None, now)
+                    continue
+                    
+                cover_art_data = cover_art_data_dict[release_id]
+                if not cover_art_data or 'id' not in cover_art_data:
+                    logger.debug(f'Invalid cover art data for {release_id}')
+                    results[result_index] = (None, now)
+                    continue
+                    
+                image_id = cover_art_data['id']
+                images = {
+                    'small': self._build_caa_url(release_id, image_id, size=250),
+                    'mid': self._build_caa_url(release_id, image_id, size=500),
+                    'large': self._build_caa_url(release_id, image_id, size=1200),
+                    'original': self._build_caa_url(release_id, image_id)
+                }
+                
+                # 缓存结果
+                await util.RELEASE_IMAGE_CACHE.set(release_id, images, ttl=ttl)
+                results[result_index] = (images, expiry)
+                
+            return results
             
         except ProviderUnavailableException:
-            return (cached or [], now + timedelta(seconds=CONFIG.CACHE_TTL['provider_error']))
-            
+            # 如果服务不可用，对所有未缓存的结果返回空列表
+            error_expiry = now + timedelta(seconds=CONFIG.CACHE_TTL['provider_error'])
+            for i in uncached_indices.values():
+                results[i] = (None, error_expiry)
+            return results
 
     @staticmethod
     def _build_caa_url(release_id, image_id, size=None):
@@ -1052,7 +1103,7 @@ class SolrSearchProvider(HttpProvider,
         if not response:
             return {}
         
-        return self.parse_release_search(response)
+        return response
     
     async def search_recording_name(self, name, limit=None, artist_name=''):
         """
@@ -1085,25 +1136,6 @@ class SolrSearchProvider(HttpProvider,
             return {}
         
         return response
-
-    @staticmethod
-    def parse_release_search(response):
-        """
-        解析 release 搜索结果
-        :param response: Solr API 响应数据
-        :return: 标准化的 release 列表
-        """
-        if not 'count' in response or response['count'] == 0:
-            return []
-        
-        return [{
-            'id': result['id'],
-            'title': result['title'],
-            'releasedate': result.get('date', ''),
-            'artistname': result.get('artist-credit-phrase', ''),
-            'type': result.get('primary-type', 'Unknown'),
-            'score': result['score']
-        } for result in response['releases']]
 
     @staticmethod
     def escape_lucene_query(text):
@@ -1434,33 +1466,41 @@ class MusicbrainzDbProvider(Provider,
     async def get_series(self, mbid):
         series = await self.query_from_file('release_group_series.sql', mbid)
         return [json.loads(x['item']) for x in series]
-    
-    async def get_release_cover_art(self, release_id):
+
+    async def get_release_cover_art(self, release_ids):
         """
-        从 MusicBrainz 数据库获取发行版的封面信息
-        返回最新的正面封面
+        获取一个或多个发行版(Release)的封面信息
+        
+        :param release_ids: 单个 MusicBrainz Release ID 或 ID 列表
+        :return: 如果传入单个 ID，返回单个封面信息；如果传入 ID 列表，返回字典 {release_id: cover_art_data}
+            cover_art_data 包含:
+            {
+                'id': 封面图片ID,
+                'type': 封面类型(front/back/medium等),
+                'approved': 是否已审核通过,
+                'edit': 最后编辑ID,
+                'comment': 备注信息,
+                'uploaded': 上传时间
+            }
         """
-        results = await self.query_from_file('release_cover_art.sql', release_id)
+        results = await self.query_from_file('release_cover_art.sql', release_ids)
         
         if not results:
             return None
-        
-        return results[0]
-
-    async def get_release_group_cover_art(self, release_group_id):
-        """
-        从 MusicBrainz 数据库获取专辑组的封面信息
-        
-        通过查找专辑组下的第一个发行版的封面作为专辑组的封面
-        """
-        results = await self.query_from_file('release_group_latest_release_with_cover.sql', release_group_id)
-        
-        if not results:
-            return []
             
-        # 使用第一个发行版的封面
-        release_id = results[0]['release_id']
-        return await self.get_release_cover_art(release_id)
+        # 将结果转换为字典，每个 release_id 对应其最新的封面
+        result_dict = {}
+        for row in results:
+            release_id = row['release_id']
+            # 由于结果按 release_id, date_uploaded DESC 排序
+            # 所以每个 release_id 的第一条记录就是最新的封面
+            if release_id not in result_dict:
+                result_dict[release_id] = {
+                    'id': row['id'],
+                    'uploaded': row['uploaded']
+                }
+            
+        return result_dict
 
     async def query_from_file(self, sql_file, *args):
         """

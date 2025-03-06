@@ -355,24 +355,44 @@ async def get_release_info(mbid):
 async def get_release_search_results(query, limit, artist_name):
     search_providers = provider.get_providers_implementing(provider.ReleaseNameSearchMixin)
     if search_providers:
-        search_results = await search_providers[0].search_release_name(query, artist_name=artist_name, limit=limit)
-        
-        if not search_results:
+        response = await search_providers[0].search_release_name(query, artist_name=artist_name, limit=limit)
+        releases = response.get('releases', None)
+
+        if not releases:
             return []
             
-        # 创建id到score的映射
-        score_map = {item['id']: item['score'] for item in search_results}
-        release_ids = list(score_map.keys())
-        
-        # 获取详细信息
-        release_provider = provider.get_providers_implementing(provider.ReleaseByIdMixin)[0]
-        releases = await release_provider.get_release_by_id(release_ids)
-        
+        search_result = []
         for release in releases:
-            # 将score添加到对应的release中
-            release['score'] = score_map[release['id']]
-        
-        return releases
+            def get_artists(artist_credit):
+                if not artist_credit:
+                    return []
+                return [artist['name'] for artist in artist_credit]
+
+            def get_type(release_group):
+                if not release_group or 'primary-type' not in release_group:
+                    return 'Unknown'
+                return release_group['primary-type']
+
+            search_result.append({
+                'id': release['id'],
+                'artists': get_artists(release.get('artist-credit', None)),
+                'title': release['title'],
+                'type': get_type(release.get('release-group', None)),
+                'score': release['score'],
+            })
+            
+        # 批量获取封面
+        art_providers = provider.get_providers_implementing(provider.ReleaseArtworkMixin)
+        if art_providers:
+            release_ids = [r['id'] for r in search_result]
+            image_results = await art_providers[0].get_release_images_multi(release_ids)
+            
+            # 将封面信息添加到搜索结果中
+            for i, (images, _) in enumerate(image_results):
+                if images:
+                    search_result[i]['images'] = images
+                    
+        return search_result
     return []
         
 

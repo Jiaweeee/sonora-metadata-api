@@ -385,15 +385,7 @@ async def search_release():
         artist_name
     )
     if releases:
-        search_results = [{
-            'id': item['id'],
-            'title': item['title'],
-            'artistname': item['artistname'],
-            'image': item.get('image', None),
-            'type': item['type'],
-            'score': item['score'],
-        } for item in releases]
-        return jsonify({'results': search_results})
+        return jsonify({'results': releases})
     else:
         return jsonify(error='No release search providers found'), 500
 
