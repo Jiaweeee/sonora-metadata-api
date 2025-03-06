@@ -53,14 +53,22 @@ SELECT
             FROM main_artists
         ),
         'credits', (
-            SELECT json_agg(
-                json_build_object(
-                    'id', artist_id,
-                    'name', name,
-                    'role', role
-                )
-            )
-            FROM track_credits
+            SELECT json_agg(credit_info)
+            FROM (
+                SELECT 
+                    role,
+                    json_build_object(
+                        'role', role,
+                        'artists', json_agg(
+                            json_build_object(
+                                'id', artist_id,
+                                'name', name
+                            )
+                        )
+                    ) as credit_info
+                FROM track_credits
+                GROUP BY role
+            ) grouped_credits
         ),
         'urls', (
             SELECT json_agg(
