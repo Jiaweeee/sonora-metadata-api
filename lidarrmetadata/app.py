@@ -168,33 +168,12 @@ async def get_artist_info_route(mbid):
     uuid_validation_response = validate_mbid(mbid)
     if uuid_validation_response:
         return uuid_validation_response
-    
-    artist_task = asyncio.create_task(api.get_artist_info(mbid))
-    albums_task = asyncio.create_task(api.get_artist_albums(mbid))
 
-    artist, expiry = await artist_task
+    artist, expiry = await api.get_artist_info(mbid)
 
-    albums = await albums_task
-        
-    # Filter release group types
-    # This will soon happen client side but keep around until api version is bumped for older clients
-    primary_types = request.args.get('primTypes', None)
-    if primary_types:
-        primary_types = primary_types.split('|')
-        albums = list(filter(lambda release_group: release_group.get('Type') in primary_types, albums))
-    secondary_types = request.args.get('secTypes', None)
-    if secondary_types:
-        secondary_types = set(secondary_types.split('|'))
-        albums = list(filter(lambda release_group: (release_group['SecondaryTypes'] == [] and 'Studio' in secondary_types)
-                             or secondary_types.intersection(release_group.get('SecondaryTypes')),
-                             albums))
-    release_statuses = request.args.get('releaseStatuses', None)
-    if release_statuses:
-        release_statuses = set(release_statuses.split('|'))
-        albums = list(filter(lambda album: release_statuses.intersection(album.get('ReleaseStatuses')),
-                             albums))
+    releases = await api.get_artist_releases(mbid)
 
-    artist['Albums'] = albums
+    artist['works'] = releases
 
     return await add_cache_control_header(jsonify(artist), expiry)
 

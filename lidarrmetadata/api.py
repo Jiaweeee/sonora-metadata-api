@@ -107,7 +107,6 @@ class MissingProviderException(Exception):
 
 @postgres_cache(util.ARTIST_CACHE)
 async def get_artist_info(mbid):
-
     artists = await get_artist_info_multi([mbid])
     if not artists:
         artist_provider = provider.get_providers_implementing(provider.ArtistByIdMixin)[0]
@@ -116,8 +115,12 @@ async def get_artist_info(mbid):
         
         if not artists:
             raise ArtistNotFoundException(mbid)
-    
-    return artists[0]
+            
+    artist, expiry = artists[0]  # 解构元组，获取 data 和 expiry
+    if 'links' in artist:
+        artist['streaming_links'] = get_artist_streaming_links(artist['links'])
+        del artist['links']
+    return artist, expiry  # 返回处理后的 artist 数据和过期时间
 
 async def get_artist_info_multi(mbids):
     
@@ -183,13 +186,66 @@ def combine_images(a, b):
 
     return result
 
-async def get_artist_albums(mbid):
+async def get_artist_release_groups(mbid):
     release_group_providers = provider.get_providers_implementing(
         provider.ReleaseGroupByArtistMixin)
     if release_group_providers and not mbid in CONFIG.BLACKLISTED_ARTISTS:
         return await release_group_providers[0].get_release_groups_by_artist(mbid)
     else:
         return []
+
+async def get_artist_releases(mbid):
+    """
+    获取艺术家的发行版信息，将 release group 的 primary_release 中的 id 和 date 字段提取到外层
+    
+    :param mbid: 艺术家的 MusicBrainz ID
+    :return: 按 primary_type 分组的发行版信息，每个发行版包含 id、title、date 和 images 字段
+    """
+    release_groups = await get_artist_release_groups(mbid)
+    
+    if not release_groups:
+        return {}
+        
+    result = {}
+    all_releases = []  # 用于收集所有需要获取封面的 release
+    release_map = {}  # 用于映射 release_id 到其在结果中的位置
+    
+    # 第一步：处理所有 release groups 并收集 release ids
+    for type_name, groups in release_groups.items():
+        if not groups:  # 如果这个类型没有数据，保持为 null
+            result[type_name] = groups
+            continue
+            
+        processed_groups = []
+        for group in groups:
+            if not group.get('primary_release'):
+                continue
+                
+            processed_group = {
+                'release_group_id': group['id'],
+                'id': group['primary_release']['id'],  # 使用 primary_release 的 id
+                'title': group['title'],
+                'date': group['primary_release'].get('date')  # 提取 date 字段
+            }
+            processed_groups.append(processed_group)
+            all_releases.append(processed_group)
+            release_map[processed_group['id']] = processed_group
+            
+        result[type_name] = processed_groups
+    
+    # 第二步：批量获取所有 release 的封面
+    if all_releases:
+        art_provider = provider.get_providers_implementing(provider.ReleaseArtworkMixin)[0]
+        release_ids = [release['id'] for release in all_releases]
+        image_results = await art_provider.get_release_images_multi(release_ids)
+        
+        # 将封面信息添加到对应的 release 中
+        for i, release_id in enumerate(release_ids):
+            images, _ = image_results[i]
+            if images and release_id in release_map:
+                release_map[release_id]['images'] = images
+    
+    return result
 
 async def get_release_group_artists(release_group):
     
@@ -301,26 +357,56 @@ async def get_release_info_basic(mbid):
 
 def get_streaming_links(links):
     """
-    从链接列表中提取流媒体服务的链接
-    :param links: 链接列表
+    从发行版的链接列表中提取流媒体服务的链接
+    :param links: 链接列表，每个链接包含 'type' 和 'url' 字段
     :return: 流媒体服务的链接列表。当前只支持 Spotify 和 Apple Music
     """
     if not links:
         return None
     streaming_links = []
     for link in links:
-        if 'streaming' in link['type']:
-            url = link['url'].lower()
+        if 'streaming' in link.get('type', ''):
+            url = link.get('url', link.get('target', '')).lower()
             if 'spotify' in url:
                 streaming_links.append({
                     'source': 'spotify',
-                    'url': link['url']
+                    'url': link.get('url', link.get('target'))
                 })
             elif 'music.apple' in url:
                 streaming_links.append({
                     'source': 'apple_music',
-                    'url': link['url']
+                    'url': link.get('url', link.get('target'))
                 })
+    return streaming_links if streaming_links else None
+
+def get_artist_streaming_links(links):
+    """
+    从艺术家的链接列表中提取流媒体服务的链接，每个服务类型只保留一个链接
+    :param links: 链接列表，每个链接包含 'type' 和 'target' 字段
+    :return: 流媒体服务的链接列表。当前只支持 Spotify 和 Apple Music，每个服务只返回一个链接
+    """
+    if not links:
+        return None
+        
+    # 使用字典记录已添加的服务类型
+    service_links = {}
+    
+    for link in links:
+        link_type = link.get('type', '').lower()
+        url = link.get('url', link.get('target', ''))
+        
+        if link_type == 'spotify' and 'spotify' not in service_links:
+            service_links['spotify'] = {
+                'source': 'spotify',
+                'url': url
+            }
+        elif link_type == 'apple' and 'apple_music' not in service_links and 'artist' in url.lower():
+            service_links['apple_music'] = {
+                'source': 'apple_music',
+                'url': url
+            }
+            
+    streaming_links = list(service_links.values())
     return streaming_links if streaming_links else None
 
 async def get_release_images(mbid):

@@ -1455,13 +1455,10 @@ class MusicbrainzDbProvider(Provider,
         
         logger.debug("got artist release groups")
 
-        return [{'Id': result['gid'],
-                 'OldIds': result['oldids'],
-                 'Title': result['album'],
-                 'Type': result['primary_type'],
-                 'SecondaryTypes': result['secondary_types'],
-                 'ReleaseStatuses': result['release_statuses']}
-                for result in results]
+        if not results or not results[0]['result']:
+            return {}
+            
+        return json.loads(results[0]['result'])
 
     async def get_series(self, mbid):
         series = await self.query_from_file('release_group_series.sql', mbid)
