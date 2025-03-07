@@ -245,6 +245,7 @@ async def search_track():
     else:
         return jsonify({'results': []})
 
+@deprecated
 @app.route('/album/<mbid>/refresh', methods=['POST'])
 async def refresh_release_group_route(mbid):
     uuid_validation_response = validate_mbid(mbid)
@@ -256,6 +257,7 @@ async def refresh_release_group_route(mbid):
     await invalidate_cloudflare([f'{base_url}/album/{mbid}'])
     return jsonify(success=True)
 
+@deprecated
 @app.route('/recent/artist', methods=['GET'])
 @no_cache
 async def get_recently_updated_artists():
@@ -266,6 +268,7 @@ async def get_recently_updated_artists():
     updated = await util.ARTIST_CACHE.get_recently_updated(since, 10000)
     return jsonify(updated)
 
+@deprecated
 @app.route('/recent/album', methods=['GET'])
 async def get_recently_updated_albums():
 
@@ -403,7 +406,8 @@ async def get_album_search_results(query, limit, include_tracks, artist_name):
     else:
         abort(500, "No album search providers")
 
-@app.route('/search/artist', methods=['GET'])
+@deprecated
+@app.route('/search/artist/legacy', methods=['GET'])
 async def search_artist():
     """Search for a human-readable artist
     ---
@@ -443,6 +447,46 @@ async def search_artist():
     
     return await add_cache_control_header(jsonify(artists), validity)
 
+@app.route('/search/artist', methods=['GET'])
+async def search_artist_new():
+    query = get_search_query()
+
+    limit = request.args.get('limit', default=10, type=int)
+    limit = None if limit < 1 else limit
+
+    results = await get_artist_search_results_new(query, limit)
+
+    return jsonify(results)
+
+async def get_artist_search_results_new(query, limit):
+    search_providers = provider.get_providers_implementing(
+        provider.ArtistNameSearchMixin)
+
+    if not search_providers:
+        return abort(500, 'No search providers available')
+    
+    artists = await search_providers[0].search_artist_name(query, limit=limit)
+    artist_ids = [item['id'] for item in artists]
+    
+    # Get artwork provider
+    artwork_providers = provider.get_providers_implementing(provider.ArtistArtworkMixin)
+    if artwork_providers:
+        # Get images for each artist
+        artwork_provider = artwork_providers[0]
+        artist_images_results = await asyncio.gather(*[artwork_provider.get_artist_images(aid) for aid in artist_ids])
+        
+        # Add images to the original search results - only take the first element of the tuple (images list)
+        for artist, image_result in zip(artists, artist_images_results):
+            artist['images'] = image_result[0] if image_result else []
+    
+    return {'results': [{
+        'id': artist['id'],
+        'name': artist['name'],
+        'images': artist['images'],
+        'score': artist['score']
+    } for artist in artists]}
+
+@deprecated
 async def get_artist_search_results(query, limit):
     search_providers = provider.get_providers_implementing(
         provider.ArtistNameSearchMixin)

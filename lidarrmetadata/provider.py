@@ -1036,7 +1036,7 @@ class SolrSearchProvider(HttpProvider,
         if limit:
             url += u'&rows={}'.format(limit)
         
-        response = await self.get_with_limit(url)
+        response = await self.get(url)
         
         if not response:
             return {}
@@ -1143,16 +1143,9 @@ class SolrSearchProvider(HttpProvider,
         
     @staticmethod
     def parse_artist_search(response):
-        
-        if not 'count' in response or response['count'] == 0:
+        if not response:
             return []
-        
-        return [{'Id': x['id'],
-                 'ArtistName': x['name'],
-                 'Type': x['type'] if 'type' in x else '',
-                 'Disambiguation': x['disambiguation'] if 'disambiguation' in x else '',
-                 'Score': x['score']}
-                for x in response['artists']];
+        return response['artists']
     
     @staticmethod
     def parse_album_search(response):
