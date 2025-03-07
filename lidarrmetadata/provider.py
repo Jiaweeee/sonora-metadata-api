@@ -727,10 +727,10 @@ class CoverArtArchiveProvider(Provider, ReleaseArtworkMixin):
                     
                 image_id = cover_art_data['id']
                 images = {
-                    'small': self._build_caa_url(release_id, image_id, size=250),
-                    'mid': self._build_caa_url(release_id, image_id, size=500),
-                    'large': self._build_caa_url(release_id, image_id, size=1200),
-                    'original': self._build_caa_url(release_id, image_id)
+                    'small': self.build_caa_url(release_id, image_id, size=250),
+                    'mid': self.build_caa_url(release_id, image_id, size=500),
+                    'large': self.build_caa_url(release_id, image_id, size=1200),
+                    'original': self.build_caa_url(release_id, image_id)
                 }
                 
                 # 缓存结果
@@ -747,14 +747,14 @@ class CoverArtArchiveProvider(Provider, ReleaseArtworkMixin):
             return results
 
     @staticmethod
-    def _build_caa_url(release_id, image_id, size=None):
+    def build_caa_url(release_id, image_id, size=None):
         """
         Builds the cover art archive url for a given release and image id
         :param release_id: Musicbrainz release id
         :param image_id: Cover Art Archive image id 
         :param size: Size of image to return. Should be one of: 250, 500, 1200 or None.
         """
-        base_url = f'http://coverartarchive.org/release/{release_id}/{image_id}'
+        base_url = f'http://imagecache.lidarr.audio/v1/caa/{release_id}/{image_id}'
         return f'{base_url}-{size}.jpg' if size else f'{base_url}.jpg'
 
 class FanArtTvProvider(HttpProvider, 
@@ -1323,17 +1323,6 @@ class MusicbrainzDbProvider(Provider,
         """
         results = await self.query_from_file('artist_ids_paged.sql', limit, offset)
         return [item['gid'] for item in results]
-
-    @staticmethod
-    def _build_caa_url(release_id, image_id, size=None):
-        """
-        Builds the cover art archive url for a given release and image id
-        :param release_id: Musicbrainz release id
-        :param image_id: Cover Art Archive image id 
-        :param size: Size of image to return. Should be one of: 250, 500, 1200 or None.
-        """
-        base_url = f'http://coverartarchive.org/release/{release_id}/{image_id}'
-        return f'{base_url}-{size}.jpg' if size else f'{base_url}.jpg'
     
     @classmethod
     def _load_artist(cls, data):
@@ -1367,7 +1356,7 @@ class MusicbrainzDbProvider(Provider,
             for result in release_group['images']:
                 cover_type = type_mapping.get(result['type'], None)
                 if cover_type is not None and cover_type not in art:
-                    art[cover_type] = cls._build_caa_url(result['release_gid'], result['image_id'])
+                    art[cover_type] = CoverArtArchiveProvider.build_caa_url(result['release_gid'], result['image_id'])
             release_group['images'] = [{'CoverType': art_type, 'Url': url} for art_type, url in art.items()]
         else:
             release_group['images'] = []
