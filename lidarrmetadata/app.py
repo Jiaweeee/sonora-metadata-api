@@ -408,7 +408,7 @@ async def get_album_search_results(query, limit, include_tracks, artist_name):
 
 @deprecated
 @app.route('/search/artist/legacy', methods=['GET'])
-async def search_artist():
+async def search_artist_legacy():
     """Search for a human-readable artist
     ---
     parameters:
@@ -443,51 +443,23 @@ async def search_artist():
     limit = request.args.get('limit', default=10, type=int)
     limit = None if limit < 1 else limit
 
-    artists, scores, validity = await get_artist_search_results(query, limit)
+    artists, scores, validity = await get_artist_search_results_legacy(query, limit)
     
     return await add_cache_control_header(jsonify(artists), validity)
 
 @app.route('/search/artist', methods=['GET'])
-async def search_artist_new():
+async def search_artist():
     query = get_search_query()
 
     limit = request.args.get('limit', default=10, type=int)
     limit = None if limit < 1 else limit
 
-    results = await get_artist_search_results_new(query, limit)
+    results = await api.get_artist_search_results(query, limit)
 
-    return jsonify(results)
-
-async def get_artist_search_results_new(query, limit):
-    search_providers = provider.get_providers_implementing(
-        provider.ArtistNameSearchMixin)
-
-    if not search_providers:
-        return abort(500, 'No search providers available')
-    
-    artists = await search_providers[0].search_artist_name(query, limit=limit)
-    artist_ids = [item['id'] for item in artists]
-    
-    # Get artwork provider
-    artwork_providers = provider.get_providers_implementing(provider.ArtistArtworkMixin)
-    if artwork_providers:
-        # Get images for each artist
-        artwork_provider = artwork_providers[0]
-        artist_images_results = await asyncio.gather(*[artwork_provider.get_artist_images(aid) for aid in artist_ids])
-        
-        # Add images to the original search results - only take the first element of the tuple (images list)
-        for artist, image_result in zip(artists, artist_images_results):
-            artist['images'] = image_result[0] if image_result else []
-    
-    return {'results': [{
-        'id': artist['id'],
-        'name': artist['name'],
-        'images': artist['images'],
-        'score': artist['score']
-    } for artist in artists]}
+    return jsonify({'results': results})
 
 @deprecated
-async def get_artist_search_results(query, limit):
+async def get_artist_search_results_legacy(query, limit):
     search_providers = provider.get_providers_implementing(
         provider.ArtistNameSearchMixin)
 
@@ -519,8 +491,68 @@ async def search_all():
     limit = request.args.get('limit', default=10, type=int)
     limit = None if limit < 1 else limit
 
+    # Use gather with return_exceptions=True to prevent one failure from failing all
     results = await asyncio.gather(
-        get_artist_search_results(query, limit),
+        api.get_artist_search_results(query, limit),
+        api.get_release_search_results(query, limit, None),
+        api.get_track_search_results(query, limit, None),
+        return_exceptions=True
+    )
+    
+    # Handle results, providing empty list for any failed searches
+    raw_results = {
+        'artists': results[0] if not isinstance(results[0], Exception) else [],
+        'albums': results[1] if not isinstance(results[1], Exception) else [],
+        'tracks': results[2] if not isinstance(results[2], Exception) else []
+    }
+
+    # Log any errors that occurred
+    for i, result in enumerate(['artists', 'albums', 'tracks']):
+        if isinstance(results[i], Exception):
+            logger.error(f"Error in {result} search: {str(results[i])}")
+    
+    # Combine all results into a single sorted list
+    combined_results = []
+    
+    # Process artists
+    for item in raw_results['artists']:
+        combined_results.append({
+            'score': item.get('score', 0),
+            'type': 'artist',
+            'data': item
+        })
+    
+    # Process albums
+    for item in raw_results['albums']:
+        combined_results.append({
+            'score': item.get('score', 0),
+            'type': 'album',
+            'data': item
+        })
+    
+    # Process tracks
+    for item in raw_results['tracks']:
+        combined_results.append({
+            'score': item.get('score', 0),
+            'type': 'track',
+            'data': item
+        })
+    
+    # Sort by score in descending order
+    combined_results.sort(key=lambda x: x['score'], reverse=True)
+    
+    return jsonify({'results': combined_results})
+
+@deprecated
+@app.route('/search/all/legacy', methods=['GET'])
+async def search_all_legacy():
+    query = get_search_query()
+
+    limit = request.args.get('limit', default=10, type=int)
+    limit = None if limit < 1 else limit
+
+    results = await asyncio.gather(
+        get_artist_search_results_legacy(query, limit),
         get_album_search_results(query, limit, True, None)
     )
     artists, artist_scores, artist_validity = results[0]
@@ -561,11 +593,11 @@ async def search_route():
     type = request.args.get('type', None)
 
     if type == 'artist':
-        return await search_artist()
+        return await search_artist_legacy()
     elif type == 'album':
         return await search_album()
     elif type == 'all':
-        return await search_all()
+        return await search_all_legacy()
     else:
         error = jsonify(error='Type not provided') if type is None else jsonify(
             error='Unsupported search type {}'.format(type))

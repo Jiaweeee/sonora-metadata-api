@@ -438,7 +438,7 @@ async def get_release_info(mbid):
     expiry = min(expiry, overview_expiry, image_expiry)
     return release, expiry
 
-async def get_release_search_results(query, limit, artist_name):
+async def get_release_search_results(query, limit, artist_name=''):
     search_providers = provider.get_providers_implementing(provider.ReleaseNameSearchMixin)
     if search_providers:
         response = await search_providers[0].search_release_name(query, artist_name=artist_name, limit=limit)
@@ -517,7 +517,7 @@ async def get_track_info(mbid):
 
     return track, expiry
 
-async def get_track_search_results(query, limit, artist_name):
+async def get_track_search_results(query, limit, artist_name=''):
     search_providers = provider.get_providers_implementing(provider.RecordingNameSearchMixin)
     if search_providers:
         recording_results = await search_providers[0].search_recording_name(
@@ -574,3 +574,31 @@ async def get_track_search_results(query, limit, artist_name):
             
         return tracks
     return []
+
+async def get_artist_search_results(query, limit):
+    search_providers = provider.get_providers_implementing(
+        provider.ArtistNameSearchMixin)
+
+    if not search_providers:
+        return []
+    
+    artists = await search_providers[0].search_artist_name(query, limit=limit)
+    artist_ids = [item['id'] for item in artists]
+    
+    # Get artwork provider
+    artwork_providers = provider.get_providers_implementing(provider.ArtistArtworkMixin)
+    if artwork_providers:
+        # Get images for each artist
+        artwork_provider = artwork_providers[0]
+        artist_images_results = await asyncio.gather(*[artwork_provider.get_artist_images(aid) for aid in artist_ids])
+        
+        # Add images to the original search results - only take the first element of the tuple (images list)
+        for artist, image_result in zip(artists, artist_images_results):
+            artist['images'] = image_result[0] if image_result else []
+    
+    return [{
+        'id': artist['id'],
+        'name': artist['name'],
+        'images': artist['images'],
+        'score': artist['score']
+    } for artist in artists]
