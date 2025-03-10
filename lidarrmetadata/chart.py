@@ -17,7 +17,7 @@ async def _parse_itunes_chart(URL, count):
         async with session.get(URL, timeout=aiohttp.ClientTimeout(total=5)) as response:
             json = await response.json()
             results = filter(lambda r: r.get('kind', '') == 'albums', json['feed']['results'])
-            search_provider = provider.get_providers_implementing(provider.AlbumNameSearchMixin)[0]
+            search_provider = provider.get_providers_implementing(provider.ReleaseNameSearchMixin)[0]
             search_results = []
             for result in results:
                 search_result = await search_provider.search_album_name(result['name'], artist_name=result['artistName'], limit=1)
@@ -49,7 +49,7 @@ async def get_billboard_200_albums_chart(count=10):
     """
     results = billboard.ChartData('billboard-200')
 
-    search_provider = provider.get_providers_implementing(provider.AlbumNameSearchMixin)[0]
+    search_provider = provider.get_providers_implementing(provider.ReleaseNameSearchMixin)[0]
 
     search_results = []
     for result in results:
@@ -78,101 +78,101 @@ async def get_billboard_100_artists_chart(count=10):
     for result in results:
         artist_search = await search_provider.search_artist_name(result.artist, limit=1)
         if artist_search:
-            search_results.append({'ArtistName': result.artist, 'ArtistId': artist_search[0]['Id']})
+            search_results.append({'ArtistName': result.artist, 'ArtistId': artist_search[0]['id']})
 
         if len(search_results) == count:
             break
 
     return search_results
 
-@cached(ttl = 60 * 60 * 24, alias='default')
-async def get_lastfm_album_chart(count=10, user=None):
-    """
-    Gets and parses lastfm chart
-    :param count: Number of results to return. Defaults to 10
-    :return: Parsed chart
-    """
-    client = pylast.LastFMNetwork(api_key=config.get_config().LASTFM_KEY, api_secret=config.get_config().LASTFM_SECRET)
-    client.enable_rate_limit()
-    client.disable_caching()
+# @cached(ttl = 60 * 60 * 24, alias='default')
+# async def get_lastfm_album_chart(count=10, user=None):
+#     """
+#     Gets and parses lastfm chart
+#     :param count: Number of results to return. Defaults to 10
+#     :return: Parsed chart
+#     """
+#     client = pylast.LastFMNetwork(api_key=config.get_config().LASTFM_KEY, api_secret=config.get_config().LASTFM_SECRET)
+#     client.enable_rate_limit()
+#     client.disable_caching()
 
-    if user:
-        user = client.get_user(user[0])
-        lastfm_albums = user.get_top_albums(limit = count * 2)
-    else:
-        tag = client.get_tag('all')
-        lastfm_albums = tag.get_top_albums(limit = count * 2)
+#     if user:
+#         user = client.get_user(user[0])
+#         lastfm_albums = user.get_top_albums(limit = count * 2)
+#     else:
+#         tag = client.get_tag('all')
+#         lastfm_albums = tag.get_top_albums(limit = count * 2)
 
-    album_provider = provider.get_providers_implementing(provider.ReleaseGroupByIdMixin)[0]
-    albums = []
-    for lastfm_album in lastfm_albums:
-        # Try to stop lastfm from erroring out
-        await asyncio.sleep(1)
+#     album_provider = provider.get_providers_implementing(provider.ReleaseGroupByIdMixin)[0]
+#     albums = []
+#     for lastfm_album in lastfm_albums:
+#         # Try to stop lastfm from erroring out
+#         await asyncio.sleep(1)
         
-        try:
-            # TODO Figure out a cleaner way to do this
-            rgid = await album_provider.map_query(
-                'SELECT release_group.gid '
-                'FROM release '
-                'JOIN release_group ON release_group.id = release.release_group '
-                'WHERE release.gid = $1 '
-                'LIMIT 1',
-                lastfm_album.item.get_mbid()
-            )
+#         try:
+#             # TODO Figure out a cleaner way to do this
+#             rgid = await album_provider.map_query(
+#                 'SELECT release_group.gid '
+#                 'FROM release '
+#                 'JOIN release_group ON release_group.id = release.release_group '
+#                 'WHERE release.gid = $1 '
+#                 'LIMIT 1',
+#                 lastfm_album.item.get_mbid()
+#             )
 
-            if rgid:
-                search_result = await _parse_album_search_result({'Id': rgid[0]['gid']})
-                if search_result:
-                    albums.append(search_result)
+#             if rgid:
+#                 search_result = await _parse_album_search_result({'Id': rgid[0]['gid']})
+#                 if search_result:
+#                     albums.append(search_result)
 
-                    if len(albums) == count:
-                        break
-        except:
-            pass
+#                     if len(albums) == count:
+#                         break
+#         except:
+#             pass
 
-    if len(albums) > count:
-        albums = albums[:count]
+#     if len(albums) > count:
+#         albums = albums[:count]
 
-    return albums
+#     return albums
 
-@cached(ttl = 60 * 60 * 24, alias='default')
-async def get_lastfm_artist_chart(count=10, user=None):
-    """
-    Gets and parses lastfm chart
-    :param count: Number of results to return. Defaults to 10
-    :return: Parsed chart
-    """
-    client = pylast.LastFMNetwork(api_key=config.get_config().LASTFM_KEY, api_secret=config.get_config().LASTFM_SECRET)
-    client.enable_rate_limit()
-    client.disable_caching()
+# @cached(ttl = 60 * 60 * 24, alias='default')
+# async def get_lastfm_artist_chart(count=10, user=None):
+#     """
+#     Gets and parses lastfm chart
+#     :param count: Number of results to return. Defaults to 10
+#     :return: Parsed chart
+#     """
+#     client = pylast.LastFMNetwork(api_key=config.get_config().LASTFM_KEY, api_secret=config.get_config().LASTFM_SECRET)
+#     client.enable_rate_limit()
+#     client.disable_caching()
 
-    if user:
-        user = client.get_user(user[0])
-        lastfm_artists = user.get_top_artists(limit = count * 2)
-    else:
-        lastfm_artists = client.get_top_artists(limit = count * 2)
+#     if user:
+#         user = client.get_user(user[0])
+#         lastfm_artists = user.get_top_artists(limit = count * 2)
+#     else:
+#         lastfm_artists = client.get_top_artists(limit = count * 2)
 
-    artists = []
-    search_provider = provider.get_providers_implementing(provider.ArtistNameSearchMixin)[0]
-    for lastfm_artist in lastfm_artists:
-        # Try to stop lastfm from erroring out
-        await asyncio.sleep(1)
+#     artists = []
+#     search_provider = provider.get_providers_implementing(provider.ArtistNameSearchMixin)[0]
+#     for lastfm_artist in lastfm_artists:
+#         # Try to stop lastfm from erroring out
+#         await asyncio.sleep(1)
 
-        artist = {'ArtistName': lastfm_artist.item.name, 'ArtistId': lastfm_artist.item.get_mbid()}
+#         artist = {'ArtistName': lastfm_artist.item.name, 'ArtistId': lastfm_artist.item.get_mbid()}
 
-        if not all(artist.values()):
-            results = await search_provider.search_artist_name(artist['ArtistName'], limit=1)
-            if results:
-                results = results[0]
-                artist = {'ArtistName': results['ArtistName'], 'ArtistId': results['Id']}
+#         if not all(artist.values()):
+#             results = await search_provider.search_artist_name(artist['ArtistName'], limit=1)
+#             if results:
+#                 results = results[0]
+#                 artist = {'ArtistName': results['ArtistName'], 'ArtistId': results['Id']}
 
-        if all(artist.values()):
-            artists.append(artist)
+#         if all(artist.values()):
+#             artists.append(artist)
 
-    if len(artists) > count:
-        artists = artists[:count]
+#     if len(artists) > count:
+#         artists = artists[:count]
 
-    return artists
+#     return artists
 
 
 async def _parse_album_search_result(search_result):
