@@ -220,6 +220,7 @@ async def get_track_info_route(mbid):
     track, _ = await api.get_track_info(mbid)
     return jsonify(track)
 
+@deprecated("Use /search?type=track instead")
 @app.route('/search/track')
 async def search_track():
     """
@@ -318,8 +319,8 @@ async def series_route(mbid):
     return await add_cache_control_header(jsonify(result), expiry)
 
 @deprecated('Use /search/release instead.')
-@app.route('/search/album')
-async def search_album():
+@app.route('/search/album/legacy')
+async def search_album_legacy():
     """Search for a human-readable album
     ---
     parameters:
@@ -443,7 +444,8 @@ async def search_artist_legacy():
     
     return await add_cache_control_header(jsonify(artists), validity)
 
-@app.route('/search/artist', methods=['GET'])
+@deprecated('User /search?type=artist instead')
+@app.route('/search/artist')
 async def search_artist():
     query = get_search_query()
 
@@ -585,19 +587,173 @@ async def search_fingerprint():
     return await add_cache_control_header(jsonify(albums), validity)
 
 @app.route('/search')
-async def search_route():
-    type = request.args.get('type', None)
+async def search():
+    """Unified search endpoint that can search for artists, releases, tracks or all
+    
+    Query Parameters:
+    - query: Search query (required)
+    - type: Type of search - one of: artist, release, track, all (required)
+    - artist: Artist name filter (optional)
+    - limit: Maximum number of results to return (optional, default 10)
+    
+    Returns:
+    {
+        "results": [
+            {
+                "type": "artist|release|track",
+                "score": float,
+                "data": {
+                    "id": string,              # MusicBrainz ID
+                    "title": string,           # Name of artist/release/track
+                    "entity_type": string,     # "Artist", "Album", or "Song"
+                    "artist_name": string,     # Artist name(s) joined by " & " (for release/track only)
+                    "image": string           # URL to cover image, can be null
+                }
+            },
+            ...
+        ]
+    }
+    """
+    query = get_search_query()
+    search_type = request.args.get('type')
+    artist_name = request.args.get('artist', '')
+    limit = request.args.get('limit', default=10, type=int)
+    limit = None if limit < 1 else limit
 
-    if type == 'artist':
-        return await search_artist_legacy()
-    elif type == 'album':
-        return await search_album()
-    elif type == 'all':
-        return await search_all_legacy()
-    else:
-        error = jsonify(error='Type not provided') if type is None else jsonify(
-            error='Unsupported search type {}'.format(type))
-        return error, 400
+    if not search_type:
+        return jsonify(error='Search type not provided'), 400
+
+    if search_type not in ['artist', 'release', 'track', 'all']:
+        return jsonify(error=f'Invalid search type: {search_type}'), 400
+
+    try:
+        if search_type == 'artist':
+            results = await api.get_artist_search_results(query, limit)
+            formatted_results = [format_artist_result(item) for item in results]
+            
+        elif search_type == 'release':
+            results = await api.get_release_search_results(query, limit, artist_name)
+            formatted_results = [format_release_result(item) for item in results]
+            
+        elif search_type == 'track':
+            results = await api.get_track_search_results(query, limit, artist_name)
+            formatted_results = [format_track_result(item) for item in results]
+            
+        else:  # search_type == 'all'
+            results = await asyncio.gather(
+                api.get_artist_search_results(query, limit),
+                api.get_release_search_results(query, limit, artist_name),
+                api.get_track_search_results(query, limit, artist_name),
+                return_exceptions=True
+            )
+            
+            formatted_results = []
+            
+            # Process artists
+            if not isinstance(results[0], Exception):
+                formatted_results.extend([format_artist_result(item) for item in results[0]])
+            
+            # Process releases
+            if not isinstance(results[1], Exception):
+                formatted_results.extend([format_release_result(item) for item in results[1]])
+            
+            # Process tracks
+            if not isinstance(results[2], Exception):
+                formatted_results.extend([format_track_result(item) for item in results[2]])
+            
+            # Sort by score in descending order
+            formatted_results.sort(key=lambda x: x['score'], reverse=True)
+            
+            # Log any errors that occurred
+            for i, result_type in enumerate(['artists', 'releases', 'tracks']):
+                if isinstance(results[i], Exception):
+                    logger.error(f"Error in {result_type} search: {str(results[i])}")
+
+        return jsonify({'results': formatted_results})
+        
+    except Exception as e:
+        logger.error(f"Error in search: {str(e)}")
+        return jsonify(error='Internal server error'), 500
+
+def format_artist_result(item):
+    """Format artist search result into standardized structure"""
+    images = item.get('images', [])
+    image = None
+    if images:
+        image_map = {}
+        for img in images:
+            image_map[img['CoverType']] = img['Url']
+        if image_map.get('Poster'):
+            image = image_map['Poster']
+        elif image_map.get('Fanart'):
+            image = image_map['Fanart']
+
+    return {
+        'type': 'artist',
+        'score': item.get('score', 0),
+        'data': {
+            'id': item.get('id'),
+            'title': item.get('name', None),
+            'entity_type': 'Artist',
+            'image': image
+        }
+    }
+
+def format_release_result(item):
+    """Format release search result into standardized structure"""
+    
+    # 处理 image
+    images = item.get('images', None)
+    image = None
+    if images:
+        image = images['small']
+
+    # 处理艺术家信息
+    artists = item.get('artists', [])
+    artist_names = []
+    for artist in artists:
+        artist_names.append(artist)
+    artist_name = ' & '.join(artist_names) if artist_names else None
+
+    return {
+        'type': 'release',
+        'score': item.get('score', 0),
+        'data': {
+            'id': item.get('id'),
+            'title': item.get('title'),
+            'entity_type': item.get('type', 'Album'),
+            'artist_name': artist_name,
+            'image': image
+        }
+    }
+
+def format_track_result(item):
+    """Format track search result into standardized structure"""
+    
+    # 处理 image
+    images = item.get('images', None)
+    image = None
+    if images:
+        image = images['small']
+
+    # 处理艺术家信息
+    artists = item.get('artists', [])
+    artist_names = []
+    for artist in artists:
+        artist_names.append(artist)
+    artist_name = ' & '.join(artist_names) if artist_names else None
+
+    return {
+        'type': 'track',
+        'score': item.get('score', 0),
+        'data': {
+            'id': item.get('id'),
+            'title': item.get('title'),
+            'entity_type': 'Song',
+            'artist_name': artist_name,
+            'image': image
+        }
+    }
 
 @app.route('/spotify/artist/<spotify_id>', methods=['GET'])
 async def spotify_lookup_artist(spotify_id):
