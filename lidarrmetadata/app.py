@@ -323,85 +323,81 @@ async def search():
         logger.error(f"Error in search: {str(e)}")
         return jsonify(error='Internal server error'), 500
 
-def format_artist_result(item):
-    """Format artist search result into standardized structure"""
-    images = item.get('images', [])
+def format_search_result(item, entity_type):
+    """Format search result into standardized structure
+    
+    Args:
+        item: The search result item to format
+        entity_type: One of 'artist', 'release', or 'track'
+    
+    Returns:
+        Formatted search result
+    """
+    # 处理 image
     image = None
+    images = item.get('images', [])
     if images:
-        image_map = {}
-        for img in images:
-            image_map[img['CoverType']] = img['Url']
-        if image_map.get('Poster'):
-            image = image_map['Poster']
-        elif image_map.get('Fanart'):
-            image = image_map['Fanart']
+        if entity_type == 'artist':
+            # Artist 的图片处理逻辑
+            image_map = {}
+            for img in images:
+                image_map[img['CoverType']] = img['Url']
+            if image_map.get('Poster'):
+                image = image_map['Poster']
+            elif image_map.get('Fanart'):
+                image = image_map['Fanart']
+        else:
+            # Release 和 Track 的图片处理逻辑
+            if isinstance(images, dict) and 'small' in images:
+                image = images['small']
 
-    return {
-        'type': 'artist',
+    # 处理艺术家信息
+    artist_name = None
+    if entity_type in ['release', 'track']:
+        artists = item.get('artists', [])
+        artist_names = []
+        for artist in artists:
+            artist_names.append(artist)
+        artist_name = ' & '.join(artist_names) if artist_names else None
+
+    # 确定实体类型显示名称
+    entity_type_display = {
+        'artist': 'Artist',
+        'release': item.get('type', 'Album'),
+        'track': 'Song'
+    }[entity_type]
+
+    # 获取标题
+    title = item.get('name') if entity_type == 'artist' else item.get('title')
+
+    result = {
+        'type': entity_type,
         'score': item.get('score', 0),
         'data': {
             'id': item.get('id'),
-            'title': item.get('name', None),
-            'entity_type': 'Artist',
+            'title': title,
+            'entity_type': entity_type_display,
             'image': image
         }
     }
+
+    # 只为 release 和 track 添加 artist_name
+    if entity_type in ['release', 'track']:
+        result['data']['artist_name'] = artist_name
+
+    return result
+
+def format_artist_result(item):
+    """Format artist search result into standardized structure"""
+    return format_search_result(item, 'artist')
 
 def format_release_result(item):
     """Format release search result into standardized structure"""
-    
-    # 处理 image
-    images = item.get('images', None)
-    image = None
-    if images:
-        image = images['small']
-
-    # 处理艺术家信息
-    artists = item.get('artists', [])
-    artist_names = []
-    for artist in artists:
-        artist_names.append(artist)
-    artist_name = ' & '.join(artist_names) if artist_names else None
-
-    return {
-        'type': 'release',
-        'score': item.get('score', 0),
-        'data': {
-            'id': item.get('id'),
-            'title': item.get('title'),
-            'entity_type': item.get('type', 'Album'),
-            'artist_name': artist_name,
-            'image': image
-        }
-    }
+    return format_search_result(item, 'release')
 
 def format_track_result(item):
     """Format track search result into standardized structure"""
-    
-    # 处理 image
-    images = item.get('images', None)
-    image = None
-    if images:
-        image = images['small']
-
-    # 处理艺术家信息
-    artists = item.get('artists', [])
-    artist_names = []
-    for artist in artists:
-        artist_names.append(artist)
-    artist_name = ' & '.join(artist_names) if artist_names else None
-
-    return {
-        'type': 'track',
-        'score': item.get('score', 0),
-        'data': {
-            'id': item.get('id'),
-            'title': item.get('title'),
-            'entity_type': 'Song',
-            'artist_name': artist_name,
-            'image': image
-        }
-    }
+    return format_search_result(item, 'track')
 
 @app.route('/spotify/artist/<spotify_id>', methods=['GET'])
 async def spotify_lookup_artist(spotify_id):
