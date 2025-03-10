@@ -504,7 +504,7 @@ async def get_track_info(mbid):
         streaming_links = get_streaming_links(track['urls'])
         if streaming_links:
             track['streaming_links'] = streaming_links
-            del track['urls']
+        del track['urls']
     
     # 获取 release image
     release_id = track['release']['id']

@@ -1089,10 +1089,24 @@ class SolrSearchProvider(HttpProvider,
         return self.parse_album_search(response)
 
     async def search_release_name(self, name, limit=None, artist_name=''):
-        url = u'{server}/release/select?wt=mbjson&q={query}'.format(
-            server=self._search_server,
-            query=url_quote(name.encode('utf-8'))
-        )
+        """
+        Searches for release with name
+        :param name: Name of release
+        :param limit: Limit of number of results to return. Defaults to None, indicating no limit
+        :param artist_name: Artist name restriction
+        :return: List of releases
+        """
+        if artist_name:
+            query = f"({self.escape_lucene_query(name)}) AND (artist:{self.escape_lucene_query(artist_name)} OR artistname:{self.escape_lucene_query(artist_name)} OR creditname:{self.escape_lucene_query(artist_name)})"
+            url = u'{server}/release/advanced?wt=mbjson&q={query}'.format(
+                server=self._search_server,
+                query=url_quote(query.encode('utf-8'))
+            )
+        else:
+            url = u'{server}/release/select?wt=mbjson&q={query}'.format(
+                server=self._search_server,
+                query=url_quote(name.encode('utf-8'))
+            )
         
         if limit:
             url += u'&rows={}'.format(limit)
@@ -1223,9 +1237,9 @@ class MusicbrainzDbProvider(Provider,
     async def _get_pool(self):
         async with self._pool_lock:
             if self._pool is None:
-
                 logger.debug("Initializing MB DB pool")
                 
+                start = timer()
                 # Initialize pool
                 self._pool = await asyncpg.create_pool(host = self._db_host,
                                                        port = self._db_port,
@@ -1234,6 +1248,8 @@ class MusicbrainzDbProvider(Provider,
                                                        database = self._db_name,
                                                        init = self.uuid_as_str,
                                                        statement_cache_size=0)
+                elapsed = int((timer() - start) * 1000)
+                logger.info(f"MB DB pool initialized in {elapsed}ms")
                 
             return self._pool
         
