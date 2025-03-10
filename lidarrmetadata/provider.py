@@ -754,7 +754,7 @@ class CoverArtArchiveProvider(Provider, ReleaseArtworkMixin):
         :param image_id: Cover Art Archive image id 
         :param size: Size of image to return. Should be one of: 250, 500, 1200 or None.
         """
-        base_url = f'http://imagecache.lidarr.audio/v1/caa/{release_id}/{image_id}'
+        base_url = f'https://imagecache.lidarr.audio/v1/caa/{release_id}/{image_id}'
         return f'{base_url}-{size}.jpg' if size else f'{base_url}.jpg'
 
 class FanArtTvProvider(HttpProvider, 
