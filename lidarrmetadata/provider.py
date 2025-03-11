@@ -930,7 +930,7 @@ class FanArtTvProvider(HttpProvider,
         """
         images = {'Cover': util.first_key_item(response, 'albumcover'),
                   'Disc': util.first_key_item(response, 'cdart')}
-        return [{'CoverType': key, 'Url': value['url'].replace('https', 'http')}
+        return [{'CoverType': key, 'Url': value['url']}
                 for key, value in images.items() if value]
 
     @staticmethod
@@ -944,7 +944,7 @@ class FanArtTvProvider(HttpProvider,
                   'Fanart': util.first_key_item(response, 'artistbackground'),
                   'Logo': util.first_key_item(response, 'hdmusiclogo'),
                   'Poster': util.first_key_item(response, 'artistthumb')}
-        return [{'CoverType': key, 'Url': value['url'].replace('https', 'http')}
+        return [{'CoverType': key, 'Url': value['url']}
                 for key, value in images.items() if value]
 
 class SpotifyAuthProvider(HttpProvider,
