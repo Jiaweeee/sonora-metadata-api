@@ -473,8 +473,8 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     HTTP_PORT = 5001
 
     # LastFM API connection details
-    LASTFM_KEY = ''
-    LASTFM_SECRET = ''
+    LASTFM_KEY = '8212faf2c2b44eb8a7a2a9353730b282'
+    LASTFM_SECRET = '27c14aedca1394cec9426695f85aa6e0'
 
     # Spotify app details
     SPOTIFY_REDIRECT_URL = ''

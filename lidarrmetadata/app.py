@@ -225,6 +225,8 @@ async def chart_route(name, type_, selection):
         ('apple-music', 'album', 'new'): chart.get_apple_music_top_albums_chart,
         ('billboard', 'album', 'top'): chart.get_billboard_200_albums_chart,
         ('billboard', 'artist', 'top'): chart.get_billboard_100_artists_chart,
+        ('lastfm', 'artist', 'top'): chart.get_lastfm_artist_chart,
+        ('lastfm', 'album', 'top'): chart.get_lastfm_album_chart
     }
 
     if key not in charts.keys():
@@ -337,6 +339,7 @@ def format_search_result(item, entity_type):
     image = None
     images = item.get('images', [])
     if images:
+        # TODO: 支持从多种数据源获取 artist image
         if entity_type == 'artist':
             # Artist 的图片处理逻辑
             image_map = {}
