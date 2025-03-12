@@ -283,8 +283,8 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     REDIS_HOST = 'localhost'
     REDIS_PORT = 6379
     POSTGRES_CACHE_HOST = 'localhost'
-    POSTGRES_CACHE_PORT = 5432
-    MB_DB_HOST = '195.35.14.156'
+    POSTGRES_CACHE_PORT = 54321
+    MB_DB_HOST = '82.29.153.93'
 
     # TTL set in Cache-Control headers.  Use 0 to disable caching.
     # The GOOD value is used if we got info from all providers
