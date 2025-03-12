@@ -3,7 +3,7 @@ name = "lidarrmetadata"
 version = "0.1.0"
 description = "Lidarr metadata API"
 authors = ["Lidarr <development@lidarr.audio>"]
-readme = "README.rst"
+readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.9,<4"
