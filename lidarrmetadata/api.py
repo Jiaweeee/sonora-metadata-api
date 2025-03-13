@@ -12,7 +12,7 @@ from aiocache import cached
 from lidarrmetadata import config
 from lidarrmetadata import provider
 from lidarrmetadata import util
-from lidarrmetadata.chart import charts
+from lidarrmetadata.chart import charts, ChartException
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -486,6 +486,12 @@ class TrackNotFoundException(Exception):
         super().__init__(f"Track not found: {mbid}")
         self.mbid = mbid
 
+class DiscoverContentException(Exception):
+    """Raised when there is an error fetching hot songs data"""
+    def __init__(self, message="Failed to fetch hot songs data"):
+        super().__init__(message)
+        self.message = message
+
 @postgres_cache(util.TRACK_CACHE)
 async def get_track_info(mbid):
     """
@@ -603,7 +609,7 @@ async def get_artist_search_results(query, limit):
     } for artist in artists]
 
 
-@cached(ttl=60 * 60 * 24 * 7, alias='default')
+@cached(ttl=60 * 60 * 24 * 7, key='new-releases', alias='default')
 async def get_new_releases(months_threshold=2):
     """Get new releases from Billboard 200 chart within the specified time threshold.
     
@@ -647,25 +653,75 @@ async def get_new_releases(months_threshold=2):
         except (ValueError, TypeError):
             return False
 
-    chart_function = charts.get('billboard-200-albums')
-    chart_releases = await chart_function()
-    now = datetime.now()
-    expired_at = now + timedelta(hours=168)  # 7 days
-    
-    if not chart_releases:    
+    try:
+        chart_function = charts.get('billboard-200-albums')
+        chart_releases = await chart_function()
+        now = datetime.now()
+        expired_at = now + timedelta(hours=168)  # 7 days
+        
+        if not chart_releases:    
+            return {
+                'releases': [], 
+                'cache_info': {
+                    'expired_at': expired_at.isoformat(),
+                    'cached_at': now.isoformat()
+                }
+            }
+            
+        filtered_releases = list(filter(lambda release: is_recent_release(release.get('release_date')), chart_releases))
         return {
-            'releases': [], 
+            'releases': filtered_releases,
             'cache_info': {
                 'expired_at': expired_at.isoformat(),
                 'cached_at': now.isoformat()
             }
         }
+    except ChartException as e:
+        raise DiscoverContentException(str(e))
+    except Exception as e:
+        logger.error(f"Error in get_new_releases: {str(e)}")
+        raise DiscoverContentException(f"Failed to fetch new releases data: {str(e)}")
+
+@cached(ttl=60 * 60 * 24 * 7, key='hot-songs', alias='default')
+async def get_hot_songs():
+    """Get hot songs from Apple Music charts
+    
+    This function fetches the Apple Music top songs chart data and returns the top 24 songs.
+    Results are cached for 7 days to reduce API calls.
+    
+    Returns:
+        dict: A dictionary containing:
+            - songs: A list of hot songs, each containing:
+                - id: The song's MusicBrainz ID
+                - title: The song's title
+                - artists: List of artist names
+                - images: List of cover art images (optional)
+            - cache_info: Cache information containing:
+                - expired_at: ISO format timestamp when the cache will expire
+                - cached_at: Timestamp when the data was cached
+                
+    Raises:
+        HotSongsException: If there is an error fetching the hot songs data
+    """
+    try:
+        chart_function = charts.get('apple-music-top-songs')
+        chart_songs = await chart_function()
+        now = datetime.now()
+        expired_at = now + timedelta(hours=168)  # 7 days
         
-    filtered_releases = list(filter(lambda release: is_recent_release(release.get('release_date')), chart_releases))
-    return {
-        'releases': filtered_releases,
-        'cache_info': {
-            'expired_at': expired_at.isoformat(),
-            'cached_at': now.isoformat()
+        # 取前24首歌曲
+        top_songs = chart_songs[:24] if len(chart_songs) > 24 else chart_songs
+        
+        return {
+            'songs': top_songs,
+            'cache_info': {
+                'expired_at': expired_at.isoformat(),
+                'cached_at': now.isoformat()
+            }
         }
-    }
+    except ChartException as e:
+        raise DiscoverContentException(str(e))
+    except Exception as e:
+        # 处理其他异常
+        logger.error(f"Error in get_hot_songs: {str(e)}")
+        raise DiscoverContentException(f"Failed to fetch hot songs data: {str(e)}")

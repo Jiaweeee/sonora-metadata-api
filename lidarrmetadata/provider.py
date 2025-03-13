@@ -612,44 +612,95 @@ class HttpProvider(Provider,
                                    'response_status_code': response.status
                                })
 
-    async def get(self, url, raise_on_http_error=True, **kwargs):
-        try:
-            self._count_request('request')
-            start = timer()
-            session = await self._get_session()
-            async with session.get(url, **kwargs) as resp:
-                end = timer()
-                elapsed = int((end - start) * 1000)
-                logger.debug(f"Got response [{resp.status}] for URL: {url} in {elapsed}ms ")
-                self._record_response_result(resp, elapsed)
-
-                if raise_on_http_error:
-                    resp.raise_for_status()
-
-                json = await resp.json()
-                return json
-        except ValueError as error:
-            logger.error(f'Response from {self._name} not valid json', extra=dict(error=error))
-            raise
-        except (aiohttp.ClientError, aiohttp.http_exceptions.HttpProcessingError) as error:
-            logger.error(f'aiohttp exception {getattr(error, "status", None)}',
-                         extra = dict(error_message=getattr(error, "message", None), error=repr(error)))
-            raise ProviderUnavailableException(f'{self._name} aiohttp exception')
-        except asyncio.CancelledError:
-            logger.debug(f'Task cancelled {url}')
-            raise
-        except asyncio.TimeoutError:
-            logger.debug(f'Timeout for {self._name}', extra=dict(url=url))
-            self._count_request('timeout')
-            raise ProviderUnavailableException(f'{self._name} timeout')
-        except Exception as error:
-            logger.error(f'Non-aiohttp exceptions occured: {getattr(error, "__dict__", {})}', extra=dict(error = repr(error)))
-            raise
+    async def get(self, url, raise_on_http_error=True, max_retries=0, retry_delay=1.0, **kwargs):
+        """
+        Performs an HTTP GET request with optional retry mechanism
         
-    async def get_with_limit(self, url, raise_on_http_error=True, **kwargs):
+        :param url: URL to request
+        :param raise_on_http_error: Whether to raise an exception on HTTP error
+        :param max_retries: Maximum number of retry attempts (default: 0, no retries)
+        :param retry_delay: Delay between retries in seconds (default: 1.0)
+        :param kwargs: Additional arguments to pass to session.get
+        :return: JSON response
+        """
+        retries = 0
+        last_error = None
+        
+        while retries <= max_retries:
+            try:
+                if retries > 0:
+                    logger.info(f"Retry attempt {retries}/{max_retries} for URL: {url}")
+                    
+                self._count_request('request')
+                start = timer()
+                session = await self._get_session()
+                async with session.get(url, **kwargs) as resp:
+                    end = timer()
+                    elapsed = int((end - start) * 1000)
+                    logger.debug(f"Got response [{resp.status}] for URL: {url} in {elapsed}ms ")
+                    self._record_response_result(resp, elapsed)
+
+                    if raise_on_http_error:
+                        resp.raise_for_status()
+
+                    json = await resp.json()
+                    return json
+                    
+            except ValueError as error:
+                last_error = error
+                logger.error(f'Response from {self._name} not valid json', extra=dict(error=error))
+                if retries >= max_retries:
+                    raise
+                
+            except (aiohttp.ClientError, aiohttp.http_exceptions.HttpProcessingError) as error:
+                last_error = error
+                logger.error(f'aiohttp exception {getattr(error, "status", None)}',
+                            extra=dict(error_message=getattr(error, "message", None), error=repr(error)))
+                if retries >= max_retries:
+                    raise ProviderUnavailableException(f'{self._name} aiohttp exception')
+                
+            except asyncio.CancelledError:
+                logger.debug(f'Task cancelled {url}')
+                raise  # Don't retry cancelled tasks
+            
+            except asyncio.TimeoutError:
+                last_error = ProviderUnavailableException(f'{self._name} timeout')
+                logger.debug(f'Timeout for {self._name}', extra=dict(url=url))
+                self._count_request('timeout')
+                if retries >= max_retries:
+                    raise last_error
+                
+            except Exception as error:
+                last_error = error
+                logger.error(f'Non-aiohttp exceptions occured: {getattr(error, "__dict__", {})}', extra=dict(error=repr(error)))
+                if retries >= max_retries:
+                    raise
+            
+            # If we get here, we need to retry
+            retries += 1
+            if retries <= max_retries:
+                logger.info(f"Waiting {retry_delay}s before retry {retries}/{max_retries}")
+                await asyncio.sleep(retry_delay)
+        
+        # This should not be reached, but just in case
+        if last_error:
+            raise last_error
+        raise Exception(f"Failed after {max_retries} retries for unknown reason")
+
+    async def get_with_limit(self, url, raise_on_http_error=True, max_retries=0, retry_delay=1.0, **kwargs):
+        """
+        Performs an HTTP GET request with rate limiting and optional retry mechanism
+        
+        :param url: URL to request
+        :param raise_on_http_error: Whether to raise an exception on HTTP error
+        :param max_retries: Maximum number of retry attempts (default: 0, no retries)
+        :param retry_delay: Delay between retries in seconds (default: 1.0)
+        :param kwargs: Additional arguments to pass to session.get
+        :return: JSON response
+        """
         try:
             with self._limiter.limited():
-                return await self.get(url, raise_on_http_error, **kwargs)
+                return await self.get(url, raise_on_http_error, max_retries=max_retries, retry_delay=retry_delay, **kwargs)
         except limit.RateLimitedError:
             logger.debug(f'{self._name} request rate limited')
             self._count_request('ratelimit')
@@ -1020,8 +1071,16 @@ class SolrSearchProvider(HttpProvider,
 
         self._search_server = search_server
         
-    async def get_with_limit(self, url):
-        return await super().get_with_limit(url, timeout=aiohttp.ClientTimeout(total=5))
+    async def get_with_limit(self, url, max_retries=0, retry_delay=1.0):
+        """
+        Performs an HTTP GET request with rate limiting and optional retry mechanism
+        
+        :param url: URL to request
+        :param max_retries: Maximum number of retry attempts (default: 0, no retries)
+        :param retry_delay: Delay between retries in seconds (default: 1.0)
+        :return: JSON response
+        """
+        return await super().get_with_limit(url, timeout=aiohttp.ClientTimeout(total=5), max_retries=max_retries, retry_delay=retry_delay)
             
     async def search_artist_name(self, name, limit=None):
         
@@ -1035,57 +1094,12 @@ class SolrSearchProvider(HttpProvider,
         if limit:
             url += u'&rows={}'.format(limit)
         
-        response = await self.get(url)
+        response = await self.get(url, max_retries=3)
         
         if not response:
             return {}
         
         return self.parse_artist_search(response)
-    
-    # async def search_albums_with_artist(self, artist, albums, handler, limit=None):
-        
-    #     album_query = u" ".join(albums)
-    #     query = u"({album_query}) AND (artist:{artist} OR artistname:{artist} OR creditname:{artist})".format(
-    #         album_query=url_quote(self.escape_lucene_query(album_query).encode('utf-8')),
-    #         artist=url_quote(self.escape_lucene_query(artist).encode('utf-8'))
-    #     )
-        
-    #     url = u'{server}/release-group/advanced?wt=mbjson&q={query}'.format(
-    #         server=self._search_server,
-    #         query=query
-    #     )
-        
-    #     if limit:
-    #         url += u'&rows={}'.format(limit)
-            
-    #     response = await self.get_with_limit(url)
-        
-    #     if not response:
-    #         return {}
-
-    #     return handler(response)
-    
-    # async def search_album_name(self, name, limit=None, artist_name=''):
-        
-    #     if artist_name:
-    #         return await self.search_albums_with_artist(artist_name, [name], self.parse_album_search, limit)
-
-    #     # Note that when using a dismax query we shouldn't apply lucene escaping
-    #     # See https://github.com/metabrainz/musicbrainz-server/blob/master/lib/MusicBrainz/Server/Data/WebService.pm
-    #     url = u'{server}/release-group/select?wt=mbjson&q={query}'.format(
-    #         server=self._search_server,
-    #         query=url_quote(name.encode('utf-8'))
-    #     )
-        
-    #     if limit:
-    #         url += u'&rows={}'.format(limit)
-        
-    #     response = await self.get_with_limit(url)
-        
-    #     if not response:
-    #         return {}
-        
-    #     return self.parse_album_search(response)
 
     async def search_release_name(self, name, limit=None, artist_name=''):
         """
@@ -1111,7 +1125,7 @@ class SolrSearchProvider(HttpProvider,
             url += u'&rows={}'.format(limit)
         logger.debug(f'search_release_name, url = {url}')
 
-        response = await self.get(url)
+        response = await self.get(url, max_retries=3)
         
         if not response:
             return {}
@@ -1143,7 +1157,8 @@ class SolrSearchProvider(HttpProvider,
             
         logger.debug(f'search_recording_name, url = {url}')
         
-        response = await self.get(url)
+        # Use the retry mechanism with 3 retries and 1 second delay
+        response = await self.get(url, max_retries=3, retry_delay=1.0)
         
         if not response:
             return {}

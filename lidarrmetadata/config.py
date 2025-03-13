@@ -520,7 +520,7 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     CLOUDFLARE_AUTH_EMAIL = ''
     CLOUDFLARE_AUTH_KEY = ''
     CLOUDFLARE_URL_BASE = ''
-    INVALIDATE_APIKEY = 'replaceme'
+    INVALIDATE_APIKEY = '78085ee343295addf2282cfc929abd4d121d75050fce8d6eb2bae9c0a81cb20d'
 
     # Testing mode
     TESTING = False

@@ -16,33 +16,80 @@ from lidarrmetadata import util
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-async def _parse_itunes_chart(URL, count):
-    async with aiohttp.ClientSession() as session:
-        async with session.get(URL, timeout=aiohttp.ClientTimeout(total=5)) as response:
-            json = await response.json()
-            results = filter(lambda r: r.get('kind', '') == 'albums', json['feed']['results'])
-            search_provider = provider.get_providers_implementing(provider.ReleaseNameSearchMixin)[0]
-            search_results = []
-            for result in results:
-                search_result = await search_provider.search_album_name(result['name'], artist_name=result['artistName'], limit=1)
-                if search_result:
-                    search_result = search_result[0]
-                    search_results.append(await _parse_album_search_result(search_result))
+class ChartException(Exception):
+    """Raised when there is an error fetching chart data"""
+    def __init__(self, message="Failed to fetch chart data"):
+        super().__init__(message)
+        self.message = message
 
-                    if len(search_results) == count:
-                        break
-            return search_results
-
-@cached(ttl = 60 * 60 * 24, alias='default')
-async def get_apple_music_top_albums_chart(count=10):
+async def get_apple_music_top_songs_chart():
     """
     Gets and parses itunes chart
-    :param count: Number of results to return. Defaults to 10
+    :param count: Number of results to return
     :return: Chart response for itunes
+    :raises: ChartException if there is an error fetching or parsing the chart data
     """
-    URL = 'https://rss.applemarketingtools.com/api/v2/us/music/most-played/{count}/albums.json'.format(
-        count=4 * count)
-    return await _parse_itunes_chart(URL, count)
+    URL = 'https://rss.applemarketingtools.com/api/v2/us/music/most-played/50/songs.json'
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Allow redirects to handle the URL change
+            async with session.get(URL, timeout=aiohttp.ClientTimeout(total=5), allow_redirects=True) as response:
+                if response.status != 200:
+                    error_msg = f"Error fetching Apple Music top songs chart: HTTP {response.status}"
+                    logger.error(f"{error_msg}, {await response.text()[:100]}")
+                    raise ChartException(error_msg)
+                
+                try:
+                    json = await response.json()
+                except Exception as e:
+                    error_msg = f"Error parsing JSON from Apple Music: {str(e)}"
+                    logger.error(f"{error_msg}, Content-Type: {response.headers.get('Content-Type')}")
+                    raise ChartException(error_msg)
+                
+                results = filter(lambda r: r.get('kind', '') == 'songs', json['feed']['results'])
+                
+                # Create a semaphore to limit concurrent tasks
+                semaphore = asyncio.Semaphore(10)
+                
+                async def process_song(result):
+                    try:
+                        async with semaphore:
+                            search_result = await api.get_track_search_results(query=result['name'], limit=1, artist_name=result['artistName'])
+                            if search_result:
+                                track = search_result[0]
+                                # Use the artworkUrl100 from the apple music chart if track has no images
+                                if not track.get('images') and result.get('artworkUrl100'):
+                                    track['images'] = {
+                                        'small': result.get('artworkUrl100')
+                                    }
+                                return track
+                            return None
+                    except Exception as e:
+                        logger.error(f"Error processing song {result['name']}: {str(e)}")
+                        return None
+                
+                # Create tasks for all songs with semaphore
+                tasks = []
+                for result in results:
+                    tasks.append(process_song(result))
+                
+                # Execute all tasks with concurrency control
+                search_results = await asyncio.gather(*tasks)
+                
+                # Filter out None results and limit to count
+                valid_results = [result for result in search_results if result is not None]
+                
+                if not valid_results:
+                    raise ChartException("No valid songs found in Apple Music chart")
+                    
+                return valid_results
+    except ChartException:
+        # Re-raise ChartException to be handled by the caller
+        raise
+    except Exception as e:
+        error_msg = f"Error fetching Apple Music top songs chart: {str(e)}"
+        logger.error(error_msg)
+        raise ChartException(error_msg)
 
 async def get_billboard_albums_chart(chart_name=None):
     """
@@ -81,8 +128,9 @@ async def get_billboard_albums_chart(chart_name=None):
         return [result for result in search_results if result is not None]
         
     except Exception as e:
-        logger.error(f"Error fetching Billboard chart {chart_name}: {str(e)}")
-        return []
+        error_msg = f"Error fetching Billboard chart {chart_name}: {str(e)}"
+        logger.error(error_msg)
+        raise ChartException(error_msg)
 
 async def get_billboard_artists_chart(chart_name=None):
     """
@@ -118,8 +166,9 @@ async def get_billboard_artists_chart(chart_name=None):
         return [result for result in search_results if result is not None]
         
     except Exception as e:
-        logger.error(f"Error fetching Billboard chart {chart_name}: {str(e)}")
-        return []
+        error_msg = f"Error fetching Billboard chart {chart_name}: {str(e)}"
+        logger.error(error_msg)
+        raise ChartException(error_msg)
 
 async def get_billboard_songs_chart(chart_name=None):
     """
@@ -154,30 +203,9 @@ async def get_billboard_songs_chart(chart_name=None):
         return [result for result in search_results if result is not None]
         
     except Exception as e:
-        logger.error(f"Error fetching Billboard chart {chart_name}: {str(e)}")
-        raise e
-
-# @cached(ttl = 60 * 60 * 24, alias='default')
-# async def get_billboard_100_artists_chart(count=10):
-#     """
-#     Gets billboard top 100 albums
-#     :param count: Number of results to return. Defaults to 10
-#     :return: Chart response for artist-100
-#     """
-#     results = billboard.ChartData('artist-100')
-
-#     search_provider = provider.get_providers_implementing(provider.ArtistNameSearchMixin)[0]
-
-#     search_results = []
-#     for result in results:
-#         artist_search = await search_provider.search_artist_name(result.artist, limit=1)
-#         if artist_search:
-#             search_results.append({'ArtistName': result.artist, 'ArtistId': artist_search[0]['id']})
-
-#         if len(search_results) == count:
-#             break
-
-#     return search_results
+        error_msg = f"Error fetching Billboard chart {chart_name}: {str(e)}"
+        logger.error(error_msg)
+        raise ChartException(error_msg)
 
 @cached(ttl = 60 * 60 * 24, alias='default')
 async def get_lastfm_album_chart(count=10, user=None):
@@ -285,4 +313,5 @@ charts = {
     'billboard-streaming-songs': lambda: get_billboard_songs_chart('streaming-songs'),
     'billboard-emerging-artists': lambda: get_billboard_artists_chart('emerging-artists'),
     'billboard-independent-albums': lambda: get_billboard_albums_chart('independent-albums'),
+    'apple-music-top-songs': lambda: get_apple_music_top_songs_chart(),
 }

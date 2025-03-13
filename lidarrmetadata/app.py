@@ -113,6 +113,10 @@ async def handle_error(e):
 async def handle_error(e):
     return jsonify(error='Track not found'), 404
 
+@app.errorhandler(api.DiscoverContentException)
+async def handle_discover_content_error(e):
+    return jsonify(error=e.message), 503
+
 @app.errorhandler(redis.ConnectionError)
 def handle_error(e):
     return jsonify(error='Could not connect to redis'), 503
@@ -197,39 +201,6 @@ async def get_track_info_route(mbid):
         
     track, _ = await api.get_track_info(mbid)
     return jsonify(track)
-
-# @app.route('/chart/<name>/<type_>/<selection>')
-# async def chart_route(name, type_, selection):
-#     """
-#     Gets chart
-#     :param name: Name of chart. 404 if name invalid
-#     """
-#     name = name.lower()
-#     count = request.args.get('count', 10, type=int)
-
-#     # Get remaining chart-dependent args
-#     chart_kwargs = request.args.to_dict()
-#     if 'count' in chart_kwargs:
-#         del chart_kwargs['count']
-
-#     key = (name, type_, selection)
-
-#     # Function to get each chart. Use lower case for keys
-#     charts = {
-#         ('apple-music', 'album', 'top'): chart.get_apple_music_top_albums_chart,
-#         ('apple-music', 'album', 'new'): chart.get_apple_music_top_albums_chart,
-#         ('billboard', 'album', 'top'): chart.get_billboard_200_albums_chart,
-#         ('billboard', 'artist', 'top'): chart.get_billboard_100_artists_chart,
-#         ('lastfm', 'artist', 'top'): chart.get_lastfm_artist_chart,
-#         ('lastfm', 'album', 'top'): chart.get_lastfm_album_chart
-#     }
-
-#     if key not in charts.keys():
-#         return jsonify(error='Chart {}/{}/{} not found'.format(*key)), 404
-#     else:
-#         result = await charts[key](count, **chart_kwargs)
-#         expiry = provider.utcnow() + timedelta(seconds=app.config['CACHE_TTL']['chart'])
-#         return await add_cache_control_header(jsonify(result), expiry)
 
 @app.route('/search')
 async def search():
@@ -665,6 +636,66 @@ async def discover_new_releases():
     """
     result = await api.get_new_releases()
     return jsonify(result)
+
+@app.route('/discover/hot-songs')
+async def discover_hot_songs():
+    """Get hot songs from Apple Music charts
+    
+    This endpoint returns the top 24 songs from Apple Music's hot songs chart.
+    Results are cached for 7 days to reduce API calls.
+    
+    Returns:
+        JSON: A JSON response containing the list of hot songs and cache information
+        
+    Raises:
+        HotSongsException: If there is an error fetching the hot songs data
+    """
+    # Call api.get_hot_songs to retrieve hot songs data
+    results = await api.get_hot_songs()
+    return jsonify(results)
+
+@app.route('/discover/cache/invalidate', methods=['POST'])
+@no_cache
+async def invalidate_discover_cache():
+    """Invalidate a specific discover cache entry
+    
+    This endpoint allows invalidating the cache for specific discover endpoints.
+    It requires proper authorization and accepts a key parameter that identifies
+    which cache to invalidate.
+    
+    Args:
+        key: The cache key to invalidate (e.g., 'hot-songs', 'new-releases')
+        
+    Returns:
+        JSON response indicating success or failure
+    """
+    # Verify authorization
+    if request.headers.get('authorization') != app.config['INVALIDATE_APIKEY']:
+        return jsonify(error='Unauthorized'), 401
+    
+    # Map of friendly names to actual cache keys
+    cache_keys = [
+        'hot-songs',
+        'new-releases'
+    ]
+    key = request.args.get('key', None)
+    
+    # Check if the key is valid
+    if key not in cache_keys:
+        return jsonify(error=f'Invalid cache key: {key}. Valid keys are: {", ".join(cache_keys)}'), 400
+    
+    try:
+        # Delete the cache entry
+        await util.CACHE.delete(key)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully invalidated cache for {key}',
+            'invalidated_key': key,
+        })
+    except Exception as e:
+        logger.error(f'Error invalidating discover cache for {key}: {str(e)}')
+        return jsonify(error=f'Failed to invalidate cache: {str(e)}'), 500
 
 @app.after_serving
 async def run_async_del():
