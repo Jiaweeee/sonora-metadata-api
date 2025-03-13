@@ -662,19 +662,6 @@ async def discover_new_releases():
     
     This endpoint returns a list of recently released albums from the Billboard 200 chart,
     filtered to only include releases from the past 2 months.
-    
-    Returns:
-        JSON response containing:
-            - releases: A list of albums, each with:
-                - id: The release's MusicBrainz ID
-                - title: The release's title
-                - artists: List of artist names
-                - type: Release type (e.g. 'Album')
-                - release_date: Release date (YYYY-MM-DD format)
-                - images: List of cover art images (optional)
-            - cache_info: Cache information containing:
-                - expired_at: ISO format timestamp when the cache will expire
-                - cached_at: Timestamp when the data was cached
     """
     result = await api.get_new_releases()
     return jsonify(result)
