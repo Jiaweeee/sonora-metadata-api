@@ -654,6 +654,15 @@ async def discover_hot_songs():
     results = await api.get_hot_songs()
     return jsonify(results)
 
+@app.route('/discover/charts')
+async def discover_charts():
+    taste_picks_chart = await api.get_taste_picks_chart()
+    on_air_chart = await api.get_on_air_chart()
+    result = {
+        'charts': [taste_picks_chart, on_air_chart]
+    }
+    return jsonify(result)
+
 @app.route('/discover/cache/invalidate', methods=['POST'])
 @no_cache
 async def invalidate_discover_cache():

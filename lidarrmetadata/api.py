@@ -660,13 +660,7 @@ async def get_new_releases(months_threshold=2):
         expired_at = now + timedelta(hours=168)  # 7 days
         
         if not chart_releases:    
-            return {
-                'releases': [], 
-                'cache_info': {
-                    'expired_at': expired_at.isoformat(),
-                    'cached_at': now.isoformat()
-                }
-            }
+            raise ChartException('No chart releases found')
             
         filtered_releases = list(filter(lambda release: is_recent_release(release.get('release_date')), chart_releases))
         return {
@@ -725,3 +719,103 @@ async def get_hot_songs():
         # 处理其他异常
         logger.error(f"Error in get_hot_songs: {str(e)}")
         raise DiscoverContentException(f"Failed to fetch hot songs data: {str(e)}")
+    
+async def get_release_chart(chart_name):
+    try:
+        chart_function = charts.get(chart_name)
+        releases = await chart_function()
+
+        # get chart image
+        images = None
+        for release in releases:
+            if 'images' in release and release['images']:
+                images = release['images']
+                break
+
+        return {
+            'images': images,
+            'item_type': 'release',
+            'items': releases,
+        }
+    except ChartException as e:
+        raise DiscoverContentException(str(e))
+    except Exception as e:  
+        logger.error(f"Error in get_release_chart: {str(e)}")
+        raise DiscoverContentException(f"Failed to fetch release chart data: {str(e)}")
+
+async def get_track_chart(chart_name):
+    try:
+        chart_function = charts.get(chart_name)
+        tracks = await chart_function()
+        
+        # get chart image
+        images = None
+        for track in tracks:
+            if 'images' in track and track['images']:
+                images = track['images']
+                break
+
+        return {
+            'images': images, # TODO: make it configurable
+            'item_type': 'track',
+            'items': tracks,
+        }
+    except ChartException as e:
+        raise DiscoverContentException(str(e))
+    except Exception as e:  
+        logger.error(f"Error in get_track_chart: {str(e)}")
+        raise DiscoverContentException(f"Failed to fetch track chart data: {str(e)}")
+
+# TODO: cache it
+async def get_taste_picks_chart():
+    try:
+        chart = await get_release_chart(
+            chart_name='billboard-tastemaker-albums'
+        )
+        now = datetime.now()
+        expired_at = now + timedelta(hours=168)  # 7 days
+
+        # add update date
+        chart['updated_at'] = now.isoformat()
+
+        # add cache info
+        chart['cache_info'] = {
+            'expired_at': expired_at.isoformat(),
+            'cached_at': now.isoformat()
+        }
+
+        # add more info
+        chart['id'] = 'taste-picks'
+        chart['title'] = 'Taste Picks'
+        
+        return chart
+    except Exception as e:
+        logger.error(f"Error in get_taste_picks_chart: {str(e)}")
+        raise DiscoverContentException(f"Failed to fetch taste picks chart data: {str(e)}")
+
+# TODO: cache it
+async def get_on_air_chart():
+    try:
+        chart = await get_track_chart(
+            chart_name='billboard-radio-songs',
+        )
+        now = datetime.now()
+        expired_at = now + timedelta(hours=168)  # 7 days
+        
+        # add update date
+        chart['updated_at'] = now.isoformat()
+
+        # add cache info
+        chart['cache_info'] = {
+            'expired_at': expired_at.isoformat(),
+            'cached_at': now.isoformat()
+        }
+
+        # add more info
+        chart['id'] = 'on-air'
+        chart['title'] = 'On Air'
+            
+        return chart
+    except Exception as e:
+        logger.error(f"Error in get_on_air_chart: {str(e)}")
+        raise DiscoverContentException(f"Failed to fetch on air chart data: {str(e)}")
