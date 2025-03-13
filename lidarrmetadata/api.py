@@ -1,20 +1,18 @@
-import os
 import uuid
 import functools
 import asyncio
-
-import redis
-import datetime
-from datetime import timedelta
-import time
 import logging
-import aiohttp
-from timeit import default_timer as timer
+import re
 
-import lidarrmetadata
+from datetime import datetime, date, timedelta
+from timeit import default_timer as timer
+from aiocache import cached
+
+
 from lidarrmetadata import config
 from lidarrmetadata import provider
 from lidarrmetadata import util
+from lidarrmetadata.chart import charts
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -465,6 +463,7 @@ async def get_release_search_results(query, limit, artist_name=''):
                 'title': release['title'],
                 'type': get_type(release.get('release-group', None)),
                 'score': release['score'],
+                'release_date': release.get('date', None),
             })
             
         # 批量获取封面
@@ -602,3 +601,71 @@ async def get_artist_search_results(query, limit):
         'images': artist['images'],
         'score': artist['score']
     } for artist in artists]
+
+
+@cached(ttl=60 * 60 * 24 * 7, alias='default')
+async def get_new_releases(months_threshold=2):
+    """Get new releases from Billboard 200 chart within the specified time threshold.
+    
+    This function fetches the Billboard 200 chart data and filters it to only include
+    releases that came out within the specified number of months.
+    
+    Args:
+        months_threshold (int, optional): Number of months to look back. Defaults to 2.
+    
+    Returns:
+        dict: A dictionary containing:
+            - releases: A list of recent releases, each containing:
+                - id: The release's MusicBrainz ID
+                - title: The release's title
+                - artists: List of artist names
+                - type: Release type (e.g. 'Album')
+                - release_date: Release date (YYYY-MM-DD format)
+                - images: List of cover art images (optional)
+            - cache_info: Cache information containing:
+                - expired_at: ISO format timestamp when the cache will expire
+                - cached_at: Timestamp when the data was cached
+    """
+    def is_recent_release(release_date_str, threshold=months_threshold):
+        if not release_date_str:
+            return False
+        
+        today = date.today()
+        try:
+            # Handle full date format (2001-01-01)
+            if '-' in str(release_date_str):
+                release_date = datetime.strptime(str(release_date_str), '%Y-%m-%d').date()
+            # Handle year only format (2001)
+            elif re.match(r'^\d{4}$', str(release_date_str)):
+                release_date = date(int(release_date_str), 1, 1)
+            else:
+                return False
+            
+            # Calculate months between dates
+            months_diff = (today.year - release_date.year) * 12 + (today.month - release_date.month)
+            return months_diff <= threshold
+        except (ValueError, TypeError):
+            return False
+
+    chart_function = charts.get('billboard-200-albums')
+    chart_releases = await chart_function()
+    now = datetime.now()
+    expired_at = now + timedelta(hours=168)  # 7 days
+    
+    if not chart_releases:    
+        return {
+            'releases': [], 
+            'cache_info': {
+                'expired_at': expired_at.isoformat(),
+                'cached_at': now.isoformat()
+            }
+        }
+        
+    filtered_releases = list(filter(lambda release: is_recent_release(release.get('release_date')), chart_releases))
+    return {
+        'releases': filtered_releases,
+        'cache_info': {
+            'expired_at': expired_at.isoformat(),
+            'cached_at': now.isoformat()
+        }
+    }

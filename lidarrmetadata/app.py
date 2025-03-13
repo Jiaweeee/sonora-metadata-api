@@ -9,10 +9,7 @@ from quart.exceptions import HTTPStatusException
 import redis
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
-import datetime
 from datetime import timedelta
-from dateutil import parser
-import time
 import logging
 import aiohttp
 from timeit import default_timer as timer
@@ -21,11 +18,9 @@ import Levenshtein
 
 import lidarrmetadata
 from lidarrmetadata import api
-from lidarrmetadata import chart
 from lidarrmetadata import config
 from lidarrmetadata import provider
 from lidarrmetadata import util
-from lidarrmetadata.util import deprecated
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -203,38 +198,38 @@ async def get_track_info_route(mbid):
     track, _ = await api.get_track_info(mbid)
     return jsonify(track)
 
-@app.route('/chart/<name>/<type_>/<selection>')
-async def chart_route(name, type_, selection):
-    """
-    Gets chart
-    :param name: Name of chart. 404 if name invalid
-    """
-    name = name.lower()
-    count = request.args.get('count', 10, type=int)
+# @app.route('/chart/<name>/<type_>/<selection>')
+# async def chart_route(name, type_, selection):
+#     """
+#     Gets chart
+#     :param name: Name of chart. 404 if name invalid
+#     """
+#     name = name.lower()
+#     count = request.args.get('count', 10, type=int)
 
-    # Get remaining chart-dependent args
-    chart_kwargs = request.args.to_dict()
-    if 'count' in chart_kwargs:
-        del chart_kwargs['count']
+#     # Get remaining chart-dependent args
+#     chart_kwargs = request.args.to_dict()
+#     if 'count' in chart_kwargs:
+#         del chart_kwargs['count']
 
-    key = (name, type_, selection)
+#     key = (name, type_, selection)
 
-    # Function to get each chart. Use lower case for keys
-    charts = {
-        ('apple-music', 'album', 'top'): chart.get_apple_music_top_albums_chart,
-        ('apple-music', 'album', 'new'): chart.get_apple_music_top_albums_chart,
-        ('billboard', 'album', 'top'): chart.get_billboard_200_albums_chart,
-        ('billboard', 'artist', 'top'): chart.get_billboard_100_artists_chart,
-        ('lastfm', 'artist', 'top'): chart.get_lastfm_artist_chart,
-        ('lastfm', 'album', 'top'): chart.get_lastfm_album_chart
-    }
+#     # Function to get each chart. Use lower case for keys
+#     charts = {
+#         ('apple-music', 'album', 'top'): chart.get_apple_music_top_albums_chart,
+#         ('apple-music', 'album', 'new'): chart.get_apple_music_top_albums_chart,
+#         ('billboard', 'album', 'top'): chart.get_billboard_200_albums_chart,
+#         ('billboard', 'artist', 'top'): chart.get_billboard_100_artists_chart,
+#         ('lastfm', 'artist', 'top'): chart.get_lastfm_artist_chart,
+#         ('lastfm', 'album', 'top'): chart.get_lastfm_album_chart
+#     }
 
-    if key not in charts.keys():
-        return jsonify(error='Chart {}/{}/{} not found'.format(*key)), 404
-    else:
-        result = await charts[key](count, **chart_kwargs)
-        expiry = provider.utcnow() + timedelta(seconds=app.config['CACHE_TTL']['chart'])
-        return await add_cache_control_header(jsonify(result), expiry)
+#     if key not in charts.keys():
+#         return jsonify(error='Chart {}/{}/{} not found'.format(*key)), 404
+#     else:
+#         result = await charts[key](count, **chart_kwargs)
+#         expiry = provider.utcnow() + timedelta(seconds=app.config['CACHE_TTL']['chart'])
+#         return await add_cache_control_header(jsonify(result), expiry)
 
 @app.route('/search')
 async def search():
@@ -660,6 +655,29 @@ async def handle_spotify_token_renew():
         return jsonify(json)
     except aiohttp.ClientResponseError as error:
         abort(error.status, error.message)
+
+@app.route('/discover/new-releases')
+async def discover_new_releases():
+    """Get new releases from Billboard 200 chart.
+    
+    This endpoint returns a list of recently released albums from the Billboard 200 chart,
+    filtered to only include releases from the past 2 months.
+    
+    Returns:
+        JSON response containing:
+            - releases: A list of albums, each with:
+                - id: The release's MusicBrainz ID
+                - title: The release's title
+                - artists: List of artist names
+                - type: Release type (e.g. 'Album')
+                - release_date: Release date (YYYY-MM-DD format)
+                - images: List of cover art images (optional)
+            - cache_info: Cache information containing:
+                - expired_at: ISO format timestamp when the cache will expire
+                - cached_at: Timestamp when the data was cached
+    """
+    result = await api.get_new_releases()
+    return jsonify(result)
 
 @app.after_serving
 async def run_async_del():

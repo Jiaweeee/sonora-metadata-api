@@ -1000,7 +1000,6 @@ class SpotifyAuthProvider(HttpProvider,
         
 class SolrSearchProvider(HttpProvider,
                          ArtistNameSearchMixin,
-                         AlbumNameSearchMixin,
                          ReleaseNameSearchMixin,
                          RecordingNameSearchMixin):
     
@@ -1043,50 +1042,50 @@ class SolrSearchProvider(HttpProvider,
         
         return self.parse_artist_search(response)
     
-    async def search_albums_with_artist(self, artist, albums, handler, limit=None):
+    # async def search_albums_with_artist(self, artist, albums, handler, limit=None):
         
-        album_query = u" ".join(albums)
-        query = u"({album_query}) AND (artist:{artist} OR artistname:{artist} OR creditname:{artist})".format(
-            album_query=url_quote(self.escape_lucene_query(album_query).encode('utf-8')),
-            artist=url_quote(self.escape_lucene_query(artist).encode('utf-8'))
-        )
+    #     album_query = u" ".join(albums)
+    #     query = u"({album_query}) AND (artist:{artist} OR artistname:{artist} OR creditname:{artist})".format(
+    #         album_query=url_quote(self.escape_lucene_query(album_query).encode('utf-8')),
+    #         artist=url_quote(self.escape_lucene_query(artist).encode('utf-8'))
+    #     )
         
-        url = u'{server}/release-group/advanced?wt=mbjson&q={query}'.format(
-            server=self._search_server,
-            query=query
-        )
+    #     url = u'{server}/release-group/advanced?wt=mbjson&q={query}'.format(
+    #         server=self._search_server,
+    #         query=query
+    #     )
         
-        if limit:
-            url += u'&rows={}'.format(limit)
+    #     if limit:
+    #         url += u'&rows={}'.format(limit)
             
-        response = await self.get_with_limit(url)
+    #     response = await self.get_with_limit(url)
         
-        if not response:
-            return {}
+    #     if not response:
+    #         return {}
 
-        return handler(response)
+    #     return handler(response)
     
-    async def search_album_name(self, name, limit=None, artist_name=''):
+    # async def search_album_name(self, name, limit=None, artist_name=''):
         
-        if artist_name:
-            return await self.search_albums_with_artist(artist_name, [name], self.parse_album_search, limit)
+    #     if artist_name:
+    #         return await self.search_albums_with_artist(artist_name, [name], self.parse_album_search, limit)
 
-        # Note that when using a dismax query we shouldn't apply lucene escaping
-        # See https://github.com/metabrainz/musicbrainz-server/blob/master/lib/MusicBrainz/Server/Data/WebService.pm
-        url = u'{server}/release-group/select?wt=mbjson&q={query}'.format(
-            server=self._search_server,
-            query=url_quote(name.encode('utf-8'))
-        )
+    #     # Note that when using a dismax query we shouldn't apply lucene escaping
+    #     # See https://github.com/metabrainz/musicbrainz-server/blob/master/lib/MusicBrainz/Server/Data/WebService.pm
+    #     url = u'{server}/release-group/select?wt=mbjson&q={query}'.format(
+    #         server=self._search_server,
+    #         query=url_quote(name.encode('utf-8'))
+    #     )
         
-        if limit:
-            url += u'&rows={}'.format(limit)
+    #     if limit:
+    #         url += u'&rows={}'.format(limit)
         
-        response = await self.get_with_limit(url)
+    #     response = await self.get_with_limit(url)
         
-        if not response:
-            return {}
+    #     if not response:
+    #         return {}
         
-        return self.parse_album_search(response)
+    #     return self.parse_album_search(response)
 
     async def search_release_name(self, name, limit=None, artist_name=''):
         """
@@ -1161,19 +1160,19 @@ class SolrSearchProvider(HttpProvider,
             return []
         return response['artists']
     
-    @staticmethod
-    def parse_album_search(response):
+    # @staticmethod
+    # def parse_album_search(response):
         
-        if not 'count' in response or response['count'] == 0:
-            return []
+    #     if not 'count' in response or response['count'] == 0:
+    #         return []
         
-        result = [{'Id': result['id'],
-                   'Title': result['title'],
-                   'Type': result['primary-type'] if 'primary-type' in result else 'Unknown',
-                   'Score': result['score']}
-                for result in response['release-groups']]
+    #     result = [{'Id': result['id'],
+    #                'Title': result['title'],
+    #                'Type': result['primary-type'] if 'primary-type' in result else 'Unknown',
+    #                'Score': result['score']}
+    #             for result in response['release-groups']]
 
-        return result
+    #     return result
     
 class MusicbrainzDbProvider(Provider,
                             DataVintageMixin,
