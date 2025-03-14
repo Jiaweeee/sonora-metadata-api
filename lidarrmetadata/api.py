@@ -960,3 +960,24 @@ async def get_rising_stars_chart():
     except Exception as e:
         logger.error(f"Error in get_rising_stars_chart: {str(e)}")
         raise DiscoverContentException(f"Failed to fetch rising stars chart data: {str(e)}")
+
+chart_map = {
+    'taste-picks': get_taste_picks_chart,
+    'on-air': get_on_air_chart,
+    'stream-hits': get_stream_hits_chart,
+    'indie-gems': get_indie_gems_chart,
+    'rising-stars': get_rising_stars_chart,
+}
+
+async def get_all_charts():
+    """
+    Get all charts.
+
+    Returns:
+        JSON: A JSON response containing the list of charts
+    """
+    charts = []
+    for chart_function in chart_map.values():
+        chart = await chart_function()
+        charts.append(chart)
+    return charts

@@ -656,20 +656,16 @@ async def discover_hot_songs():
 
 @app.route('/discover/charts')
 async def discover_charts():
-    taste_picks_chart = await api.get_taste_picks_chart()
-    on_air_chart = await api.get_on_air_chart()
-    stream_hits_chart = await api.get_stream_hits_chart()
-    indie_gems_chart = await api.get_indie_gems_chart() 
-    rising_stars_chart = await api.get_rising_stars_chart()
+    """
+    Get all charts.
+
+    Returns:
+        JSON: A JSON response containing the list of charts
+    """
+    charts = await api.get_all_charts()
 
     result = {
-        'charts': [
-            taste_picks_chart,
-            on_air_chart,
-            stream_hits_chart,
-            indie_gems_chart,
-            rising_stars_chart
-        ]
+        'charts': charts
     }
     return jsonify(result)
 
@@ -746,18 +742,36 @@ async def invalidate_discover_cache():
 
 @app.route('/discover/chart/<chart_id>')
 async def get_chart(chart_id):
-    chart_id_map = {
-        'taste-picks': api.get_taste_picks_chart,
-        'on-air': api.get_on_air_chart,
-        'stream-hits': api.get_stream_hits_chart,
-        'indie-gems': api.get_indie_gems_chart,
-        'rising-stars': api.get_rising_stars_chart,
-    }
-    if chart_id not in chart_id_map:
+    """
+    Get a specific chart.
+
+    Returns:
+        JSON: A JSON response containing the chart data
+    """
+    if chart_id not in api.chart_map:
         return jsonify(error='Invalid chart ID'), 400
     
-    chart = await chart_id_map[chart_id]()
+    chart_function = api.chart_map[chart_id]
+    chart = await chart_function()
     return jsonify(chart)
+
+@app.route('/discover')
+async def get_discover_data():
+    """
+    Get discover data.
+
+    Returns:
+        JSON: A JSON response containing the discover data
+    """
+    new_releases = await api.get_new_releases()
+    hot_songs = await api.get_hot_songs()
+    charts = await api.get_all_charts()
+        
+    return jsonify({
+        'new_releases': new_releases,
+        'hot_songs': hot_songs,
+        'charts': charts,
+    })
 
 @app.after_serving
 async def run_async_del():
