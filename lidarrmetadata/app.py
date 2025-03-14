@@ -744,6 +744,21 @@ async def invalidate_discover_cache():
     status_code = 200 if len(results) > 0 else 500
     return jsonify(response), status_code
 
+@app.route('/discover/chart/<chart_id>')
+async def get_chart(chart_id):
+    chart_id_map = {
+        'taste-picks': api.get_taste_picks_chart,
+        'on-air': api.get_on_air_chart,
+        'stream-hits': api.get_stream_hits_chart,
+        'indie-gems': api.get_indie_gems_chart,
+        'rising-stars': api.get_rising_stars_chart,
+    }
+    if chart_id not in chart_id_map:
+        return jsonify(error='Invalid chart ID'), 400
+    
+    chart = await chart_id_map[chart_id]()
+    return jsonify(chart)
+
 @app.after_serving
 async def run_async_del():
     async_providers = provider.get_providers_implementing(provider.AsyncDel)
