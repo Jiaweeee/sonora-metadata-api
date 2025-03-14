@@ -721,19 +721,28 @@ async def get_hot_songs():
         raise DiscoverContentException(f"Failed to fetch hot songs data: {str(e)}")
     
 async def get_release_chart(chart_name):
+    def format_release(release):
+        images = release.get('images', None)
+        if 'images' in release:
+            del release['images']
+        image = images.get('small') if images else None
+        release['image'] = image
+        return release
+    
     try:
         chart_function = charts.get(chart_name)
         releases = await chart_function()
+        releases = [format_release(release) for release in releases]
 
         # get chart image
-        images = None
+        image = None
         for release in releases:
-            if 'images' in release and release['images']:
-                images = release['images']
+            if release.get('image'):
+                image = release['image']
                 break
 
         return {
-            'images': images,
+            'image': image,
             'item_type': 'release',
             'items': releases,
         }
@@ -744,19 +753,28 @@ async def get_release_chart(chart_name):
         raise DiscoverContentException(f"Failed to fetch release chart data: {str(e)}")
 
 async def get_track_chart(chart_name):
+    def format_track(track):
+        images = track.get('images', None)
+        if 'images' in track:
+            del track['images']
+        image = images.get('small') if images else None
+        track['image'] = image
+        return track
+    
     try:
         chart_function = charts.get(chart_name)
         tracks = await chart_function()
-        
+        tracks = [format_track(track) for track in tracks]
+
         # get chart image
-        images = None
+        image = None
         for track in tracks:
-            if 'images' in track and track['images']:
-                images = track['images']
+            if track.get('image'):
+                image = track['image']
                 break
 
         return {
-            'images': images, # TODO: make it configurable
+            'image': image,
             'item_type': 'track',
             'items': tracks,
         }
@@ -766,7 +784,49 @@ async def get_track_chart(chart_name):
         logger.error(f"Error in get_track_chart: {str(e)}")
         raise DiscoverContentException(f"Failed to fetch track chart data: {str(e)}")
 
-# TODO: cache it
+async def get_artist_chart(chart_name):
+    def format_artist(artist):
+        images = artist.get('images', None)
+        image = None
+        if images:
+            image_map = {}
+            for img in images:
+                image_map[img['CoverType']] = img['Url']
+            if image_map.get('Poster'):
+                image = image_map['Poster']
+            elif image_map.get('Fanart'):
+                image = image_map['Fanart']
+        return {
+            'id': artist['id'],
+            'title': artist['name'],
+            'image': image,
+        }
+
+    try:
+        chart_function = charts.get(chart_name)
+        artists = await chart_function()
+        artists = [format_artist(artist) for artist in artists]
+
+        # get chart image
+        image = None
+        for artist in artists:
+            if artist.get('image'):
+                image = artist['image']
+                break   
+        
+        return {
+            'image': image,
+            'item_type': 'artist',
+            'items': artists,
+        }   
+    except ChartException as e:
+        raise DiscoverContentException(str(e))
+    except Exception as e:
+        logger.error(f"Error in get_artist_chart: {str(e)}")
+        raise DiscoverContentException(f"Failed to fetch artist chart data: {str(e)}")
+
+
+@cached(ttl=60 * 60 * 24 * 7, key='taste-picks-chart', alias='default')
 async def get_taste_picks_chart():
     try:
         chart = await get_release_chart(
@@ -793,7 +853,7 @@ async def get_taste_picks_chart():
         logger.error(f"Error in get_taste_picks_chart: {str(e)}")
         raise DiscoverContentException(f"Failed to fetch taste picks chart data: {str(e)}")
 
-# TODO: cache it
+@cached(ttl=60 * 60 * 24 * 7, key='on-air-chart', alias='default')
 async def get_on_air_chart():
     try:
         chart = await get_track_chart(
@@ -819,3 +879,84 @@ async def get_on_air_chart():
     except Exception as e:
         logger.error(f"Error in get_on_air_chart: {str(e)}")
         raise DiscoverContentException(f"Failed to fetch on air chart data: {str(e)}")
+    
+@cached(ttl=60 * 60 * 24 * 7, key='stream-hits-chart', alias='default')
+async def get_stream_hits_chart():
+    try:
+        chart = await get_track_chart(
+            chart_name='billboard-streaming-songs'
+        )
+        now = datetime.now()
+        expired_at = now + timedelta(hours=168)  # 7 days
+
+        # add update date
+        chart['updated_at'] = now.isoformat()
+
+        # add cache info
+        chart['cache_info'] = {
+            'expired_at': expired_at.isoformat(),
+            'cached_at': now.isoformat()
+        }
+
+        # add more info
+        chart['id'] = 'stream-hits'
+        chart['title'] = 'Stream Hits'
+
+        return chart
+    except Exception as e:
+        logger.error(f"Error in get_stream_hits_chart: {str(e)}")
+        raise DiscoverContentException(f"Failed to fetch stream hits chart data: {str(e)}")
+    
+@cached(ttl=60 * 60 * 24 * 7, key='indie-gems-chart', alias='default')
+async def get_indie_gems_chart():
+    try:
+        chart = await get_release_chart(
+            chart_name='billboard-independent-albums'
+        )
+        now = datetime.now()
+        expired_at = now + timedelta(hours=168)  # 7 days
+
+        # add update date
+        chart['updated_at'] = now.isoformat()
+
+        # add cache info
+        chart['cache_info'] = {
+            'expired_at': expired_at.isoformat(),
+            'cached_at': now.isoformat()
+        }
+
+        # add more info
+        chart['id'] = 'indie-gems'
+        chart['title'] = 'Indie Gems'   
+
+        return chart
+    except Exception as e:
+        logger.error(f"Error in get_indie_gems_chart: {str(e)}")
+        raise DiscoverContentException(f"Failed to fetch indie gems chart data: {str(e)}")
+    
+@cached(ttl=60 * 60 * 24 * 7, key='rising-stars-chart', alias='default')
+async def get_rising_stars_chart():
+    try:
+        chart = await get_artist_chart(
+            chart_name='billboard-emerging-artists'
+        )
+        now = datetime.now()
+        expired_at = now + timedelta(hours=168)  # 7 days
+
+        # add update date
+        chart['updated_at'] = now.isoformat()
+
+        # add cache info
+        chart['cache_info'] = {
+            'expired_at': expired_at.isoformat(),
+            'cached_at': now.isoformat()
+        }
+        
+        # add more info
+        chart['id'] = 'rising-stars'
+        chart['title'] = 'Rising Stars'
+
+        return chart
+    except Exception as e:
+        logger.error(f"Error in get_rising_stars_chart: {str(e)}")
+        raise DiscoverContentException(f"Failed to fetch rising stars chart data: {str(e)}")

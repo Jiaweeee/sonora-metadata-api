@@ -658,22 +658,33 @@ async def discover_hot_songs():
 async def discover_charts():
     taste_picks_chart = await api.get_taste_picks_chart()
     on_air_chart = await api.get_on_air_chart()
+    stream_hits_chart = await api.get_stream_hits_chart()
+    indie_gems_chart = await api.get_indie_gems_chart() 
+    rising_stars_chart = await api.get_rising_stars_chart()
+
     result = {
-        'charts': [taste_picks_chart, on_air_chart]
+        'charts': [
+            taste_picks_chart,
+            on_air_chart,
+            stream_hits_chart,
+            indie_gems_chart,
+            rising_stars_chart
+        ]
     }
     return jsonify(result)
 
 @app.route('/discover/cache/invalidate', methods=['POST'])
 @no_cache
 async def invalidate_discover_cache():
-    """Invalidate a specific discover cache entry
+    """Invalidate one or more discover cache entries
     
     This endpoint allows invalidating the cache for specific discover endpoints.
     It requires proper authorization and accepts a key parameter that identifies
-    which cache to invalidate.
+    which cache(s) to invalidate.
     
     Args:
-        key: The cache key to invalidate (e.g., 'hot-songs', 'new-releases')
+        key: The cache key(s) to invalidate (e.g., 'hot-songs', 'new-releases')
+             Can be a single key, a comma-separated list of keys, or multiple key parameters
         
     Returns:
         JSON response indicating success or failure
@@ -682,29 +693,56 @@ async def invalidate_discover_cache():
     if request.headers.get('authorization') != app.config['INVALIDATE_APIKEY']:
         return jsonify(error='Unauthorized'), 401
     
-    # Map of friendly names to actual cache keys
-    cache_keys = [
-        'hot-songs',
-        'new-releases'
-    ]
-    key = request.args.get('key', None)
+    # Get all keys from the request arguments
+    # This handles both comma-separated values and multiple key parameters
+    keys = []
     
-    # Check if the key is valid
-    if key not in cache_keys:
-        return jsonify(error=f'Invalid cache key: {key}. Valid keys are: {", ".join(cache_keys)}'), 400
+    # Handle multiple key parameters
+    if request.args.getlist('key'):
+        keys.extend(request.args.getlist('key'))
     
-    try:
-        # Delete the cache entry
-        await util.CACHE.delete(key)
+    # If no keys were found, return an error
+    if not keys:
+        return jsonify(error='No keys provided for cache invalidation'), 400
+    
+    # Process comma-separated values in each key parameter
+    processed_keys = []
+    for key_param in keys:
+        if ',' in key_param:
+            processed_keys.extend([k.strip() for k in key_param.split(',') if k.strip()])
+        else:
+            processed_keys.append(key_param.strip())
+    
+    # Remove duplicates while preserving order
+    unique_keys = []
+    for key in processed_keys:
+        if key not in unique_keys:
+            unique_keys.append(key)
+    
+    results = []
+    failed_keys = []
+    
+    # Delete each cache entry
+    for key in unique_keys:
+        try:
+            await util.CACHE.delete(key)
+            results.append(key)
+        except Exception as e:
+            logger.error(f'Error invalidating discover cache for {key}: {str(e)}')
+            failed_keys.append({"key": key, "error": str(e)})
+    
+    # Prepare response
+    response = {
+        'success': len(results) > 0,
+        'message': f'Successfully invalidated {len(results)} cache entries',
+        'invalidated_keys': results,
+    }
+    
+    if failed_keys:
+        response['failed_keys'] = failed_keys
         
-        return jsonify({
-            'success': True,
-            'message': f'Successfully invalidated cache for {key}',
-            'invalidated_key': key,
-        })
-    except Exception as e:
-        logger.error(f'Error invalidating discover cache for {key}: {str(e)}')
-        return jsonify(error=f'Failed to invalidate cache: {str(e)}'), 500
+    status_code = 200 if len(results) > 0 else 500
+    return jsonify(response), status_code
 
 @app.after_serving
 async def run_async_del():

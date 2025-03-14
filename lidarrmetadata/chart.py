@@ -148,9 +148,12 @@ async def get_billboard_artists_chart(chart_name=None):
         async def process_artist(result):
             try:
                 async with semaphore:
-                    search_result = await search_provider.search_artist_name(result.artist, limit=1)
+                    search_result = await api.get_artist_search_results(query=result.artist, limit=1)
                     if search_result:
-                        return {'ArtistName': result.artist, 'ArtistId': search_result[0]['id']}
+                        artist = search_result[0]
+                        if 'score' in artist:
+                            del artist['score']
+                        return artist
                     return None
             except Exception as e:
                 logger.error(f"Error processing artist {result.artist}: {str(e)}")
@@ -187,7 +190,10 @@ async def get_billboard_songs_chart(chart_name=None):
                 async with semaphore:
                     search_result = await api.get_track_search_results(query=result.title, limit=1, artist_name=result.artist)
                     if search_result:
-                        return search_result[0]
+                        track = search_result[0]
+                        if 'score' in track:
+                            del track['score']
+                        return track
                     return None
             except Exception as e:
                 logger.error(f"Error processing song {result.title}: {str(e)}")
