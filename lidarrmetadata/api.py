@@ -836,7 +836,7 @@ async def get_taste_picks_chart():
         expired_at = now + timedelta(hours=168)  # 7 days
 
         # add update date
-        chart['updated_at'] = now.isoformat()
+        chart['updated_at'] = int(now.timestamp())
 
         # add cache info
         chart['cache_info'] = {
@@ -863,7 +863,7 @@ async def get_on_air_chart():
         expired_at = now + timedelta(hours=168)  # 7 days
         
         # add update date
-        chart['updated_at'] = now.isoformat()
+        chart['updated_at'] = int(now.timestamp())
 
         # add cache info
         chart['cache_info'] = {
@@ -890,7 +890,7 @@ async def get_stream_hits_chart():
         expired_at = now + timedelta(hours=168)  # 7 days
 
         # add update date
-        chart['updated_at'] = now.isoformat()
+        chart['updated_at'] = int(now.timestamp())
 
         # add cache info
         chart['cache_info'] = {
@@ -917,7 +917,7 @@ async def get_indie_gems_chart():
         expired_at = now + timedelta(hours=168)  # 7 days
 
         # add update date
-        chart['updated_at'] = now.isoformat()
+        chart['updated_at'] = int(now.timestamp())
 
         # add cache info
         chart['cache_info'] = {
@@ -944,7 +944,7 @@ async def get_rising_stars_chart():
         expired_at = now + timedelta(hours=168)  # 7 days
 
         # add update date
-        chart['updated_at'] = now.isoformat()
+        chart['updated_at'] = int(now.timestamp())
 
         # add cache info
         chart['cache_info'] = {
