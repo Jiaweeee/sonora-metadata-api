@@ -56,13 +56,7 @@ async def get_apple_music_top_songs_chart():
                         async with semaphore:
                             search_result = await api.get_track_search_results(query=result['name'], limit=1, artist_name=result['artistName'])
                             if search_result:
-                                track = search_result[0]
-                                # Use the artworkUrl100 from the apple music chart if track has no images
-                                if not track.get('images') and result.get('artworkUrl100'):
-                                    track['images'] = {
-                                        'small': result.get('artworkUrl100')
-                                    }
-                                return track
+                                return search_result[0]
                             return None
                     except Exception as e:
                         logger.error(f"Error processing song {result['name']}: {str(e)}")

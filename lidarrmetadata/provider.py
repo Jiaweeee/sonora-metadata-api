@@ -554,6 +554,16 @@ class ProviderUnavailableException(Exception):
     """ Thown on error for providers we can cope without """
     pass
 
+class NonRetryableError(Exception):
+    """
+    表示不应该重试的 HTTP 错误
+    
+    此异常用于立即中断重试流程，对于那些已知重试不会成功的错误（如 404、401 等）
+    """
+    def __init__(self, response):
+        self.response = response
+        super().__init__(f"Non-retryable HTTP error: {response.status}")
+
 class HttpProvider(Provider,
                    AsyncDel):
     """
@@ -612,80 +622,85 @@ class HttpProvider(Provider,
                                    'response_status_code': response.status
                                })
 
+    # 定义不应该重试的状态码
+    NON_RETRYABLE_STATUS_CODES = {
+        400, 401, 403, 404, 405, 409, 410, 
+        413, 414, 415, 422, 
+        501, 505, 508
+    }
+
     async def get(self, url, raise_on_http_error=True, max_retries=0, retry_delay=1.0, **kwargs):
         """
-        Performs an HTTP GET request with optional retry mechanism
+        发送 GET 请求
         
-        :param url: URL to request
-        :param raise_on_http_error: Whether to raise an exception on HTTP error
-        :param max_retries: Maximum number of retry attempts (default: 0, no retries)
-        :param retry_delay: Delay between retries in seconds (default: 1.0)
-        :param kwargs: Additional arguments to pass to session.get
-        :return: JSON response
+        :param url: 要请求的 URL
+        :param raise_on_http_error: 是否在 HTTP 错误时抛出异常
+        :param max_retries: 最大重试次数
+        :param retry_delay: 重试延迟时间（秒）
+        :param kwargs: 传递给 aiohttp 的其他参数
+        :return: 响应内容（通常是 JSON）
         """
-        retries = 0
-        last_error = None
+        start = timer()
+        retry_count = 0
+        timeout = aiohttp.ClientTimeout(total=10)
         
-        while retries <= max_retries:
+        async def _try_request():
+            session = await self._get_session()
             try:
-                if retries > 0:
-                    logger.info(f"Retry attempt {retries}/{max_retries} for URL: {url}")
+                async with session.get(url, timeout=timeout, **kwargs) as response:
+                    content_length = int(response.headers.get('Content-Length', 0))
+                    self._record_response_result(response, timer() - start)
+                    logger.debug(f"Response status: {response.status}")
                     
-                self._count_request('request')
-                start = timer()
-                session = await self._get_session()
-                async with session.get(url, **kwargs) as resp:
-                    end = timer()
-                    elapsed = int((end - start) * 1000)
-                    logger.debug(f"Got response [{resp.status}] for URL: {url} in {elapsed}ms ")
-                    self._record_response_result(resp, elapsed)
-
-                    if raise_on_http_error:
-                        resp.raise_for_status()
-
-                    json = await resp.json()
-                    return json
-                    
-            except ValueError as error:
-                last_error = error
-                logger.error(f'Response from {self._name} not valid json', extra=dict(error=error))
-                if retries >= max_retries:
-                    raise
-                
-            except (aiohttp.ClientError, aiohttp.http_exceptions.HttpProcessingError) as error:
-                last_error = error
-                logger.error(f'aiohttp exception {getattr(error, "status", None)}',
-                            extra=dict(error_message=getattr(error, "message", None), error=repr(error)))
-                if retries >= max_retries:
-                    raise ProviderUnavailableException(f'{self._name} aiohttp exception')
-                
-            except asyncio.CancelledError:
-                logger.debug(f'Task cancelled {url}')
-                raise  # Don't retry cancelled tasks
+                    if not response.ok and raise_on_http_error:
+                        # 检查是否是不应该重试的状态码
+                        if response.status in self.NON_RETRYABLE_STATUS_CODES:
+                            logger.debug(f"Non-retryable status code {response.status} for URL {url}")
+                            # 抛出一个特殊异常，表示这是不可重试的错误
+                            raise NonRetryableError(response)
+                            
+                        # 对于可重试的错误状态码，记录更多信息
+                        if response.status == 429:
+                            retry_after = response.headers.get('Retry-After', None)
+                            logger.warning(f"Rate limited (429) for URL {url}. Retry-After: {retry_after}")
+                        if response.status >= 500:
+                            logger.warning(f"Server error ({response.status}) for URL {url}")
+                        
+                        # 如果还有重试次数，返回None触发重试
+                        if retry_count < max_retries:
+                            return None
+                        
+                        # 已达最大重试次数，抛出标准异常
+                        response.raise_for_status()
+                    return await response.json()
             
-            except asyncio.TimeoutError:
-                last_error = ProviderUnavailableException(f'{self._name} timeout')
-                logger.debug(f'Timeout for {self._name}', extra=dict(url=url))
-                self._count_request('timeout')
-                if retries >= max_retries:
-                    raise last_error
-                
-            except Exception as error:
-                last_error = error
-                logger.error(f'Non-aiohttp exceptions occured: {getattr(error, "__dict__", {})}', extra=dict(error=repr(error)))
-                if retries >= max_retries:
-                    raise
-            
-            # If we get here, we need to retry
-            retries += 1
-            if retries <= max_retries:
-                logger.info(f"Waiting {retry_delay}s before retry {retries}/{max_retries}")
-                await asyncio.sleep(retry_delay)
+            except NonRetryableError as e:
+                # 对于不可重试的错误，直接让原始异常传播
+                e.response.raise_for_status()
+            except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                # 对于连接错误，记录日志并根据重试策略决定是否重试
+                logger.warning(f"HTTP error ({type(e).__name__}) for URL {url}: {str(e)}")
+                if retry_count < max_retries:
+                    return None
+                raise ProviderUnavailableException(f"HTTP error after {retry_count + 1} attempts: {str(e)}")
         
-        # This should not be reached, but just in case
-        if last_error:
-            raise last_error
-        raise Exception(f"Failed after {max_retries} retries for unknown reason")
+        # 主重试循环
+        while True:
+            try:
+                result = await _try_request()
+                if result is not None:
+                    return result
+                
+                # 如果请求失败且还有重试次数，则继续重试
+                retry_count += 1
+                logger.debug(f"Retrying request ({retry_count}/{max_retries}): {url}")
+                await asyncio.sleep(retry_delay)
+                
+            except Exception as e:
+                # 捕获所有异常并抛出自定义异常
+                if isinstance(e, ProviderUnavailableException):
+                    raise
+                raise ProviderUnavailableException(f"Error accessing {url}: {str(e)}")
 
     async def get_with_limit(self, url, raise_on_http_error=True, max_retries=0, retry_delay=1.0, **kwargs):
         """
@@ -705,17 +720,17 @@ class HttpProvider(Provider,
             logger.debug(f'{self._name} request rate limited')
             self._count_request('ratelimit')
 
-class CoverArtArchiveProvider(Provider, ReleaseArtworkMixin):
+class CoverArtArchiveProvider(HttpProvider, ReleaseArtworkMixin):
     """
     从 Cover Art Archive 获取专辑封面的 Provider
     """
-    def __init__(self):
+    def __init__(self, session=None, limiter=None):
         """
         初始化 Provider
         """
-        super(CoverArtArchiveProvider, self).__init__()
+        super(CoverArtArchiveProvider, self).__init__('coverart', session, limiter)
         self._db_provider = get_providers_implementing(MusicBrainzCoverArtMixin)[0]
-        self._base_url = 'http://coverartarchive.org/release/'
+        self._base_url = 'http://coverartarchive.org'
         
     async def get_release_images(self, release_id):
         """
@@ -733,6 +748,7 @@ class CoverArtArchiveProvider(Provider, ReleaseArtworkMixin):
         :return: 封面信息列表的列表
         """
         now = utcnow()
+        logger.debug(f"Fetching images for {len(release_ids)} releases")
         
         # 先检查缓存
         cached_results = await asyncio.gather(*[util.RELEASE_IMAGE_CACHE.get(rid) for rid in release_ids])
@@ -743,6 +759,7 @@ class CoverArtArchiveProvider(Provider, ReleaseArtworkMixin):
         # 处理缓存结果
         for i, (cached, expires) in enumerate(cached_results):
             if cached and expires > now:
+                logger.debug(f"Cache hit for release {release_ids[i]}")
                 results.append((cached, expires))
             else:
                 results.append(None)
@@ -751,8 +768,11 @@ class CoverArtArchiveProvider(Provider, ReleaseArtworkMixin):
                 uncached_indices[rid] = i
                 
         if not uncached_ids:
+            logger.debug("All release images were found in cache")
             return results
             
+        logger.debug(f"Fetching {len(uncached_ids)} uncached release images")
+        
         try:
             # 批量获取未缓存的封面
             cover_art_data_dict = await self._db_provider.get_release_cover_art(uncached_ids)
@@ -766,32 +786,109 @@ class CoverArtArchiveProvider(Provider, ReleaseArtworkMixin):
                 
                 # 如果没有找到任何封面数据，或者这个 release_id 没有对应的封面
                 if not cover_art_data_dict or release_id not in cover_art_data_dict:
-                    logger.debug(f'No cover art data found for {release_id}')
+                    logger.debug(f'No cover art data found for release {release_id}, trying release group')
+                    
+                    # 获取 release 对应的 release group id
+                    release_provider = get_providers_implementing(ReleaseByIdMixin)[0]
+                    releases = await release_provider.get_release_by_id([release_id])
+                    
+                    if releases and releases[0].get('release_group_id'):
+                        rg_id = releases[0]['release_group_id']
+                        logger.debug(f"Found release group ID {rg_id} for release {release_id}")
+                        
+                        # 尝试从 release group 获取封面
+                        try:
+                            url = f"{self._base_url}/release-group/{rg_id}"
+                            logger.debug(f"Requesting cover art from {url}")
+                            response = await self.get(url, max_retries=3)
+                            
+                            if response and 'images' in response:
+                                logger.debug(f"Found {len(response['images'])} images for release group {rg_id}")
+                                front_image = next((img for img in response['images'] 
+                                                  if img.get('front', False)), None)
+                                if front_image:
+                                    logger.debug(f"Using front image from release group {rg_id} for release {release_id}")
+                                    
+                                    if 'thumbnails' in front_image and 'image' in front_image:
+                                        # 从 URL 中提取 release_id 和 image_id
+                                        # URL 格式: https://coverartarchive.org/release/{release_id}/{image_id}.jpg
+                                        image_url = front_image['image']
+                                        logger.debug(f"Parsing image URL: {image_url}")
+                                        
+                                        try:
+                                            # 正则表达式提取 release_id 和 image_id
+                                            pattern = r'coverartarchive\.org/release/([a-f0-9-]+)/(\d+)\.jpg'
+                                            match = re.search(pattern, image_url)
+                                            
+                                            if match:
+                                                rid, image_id = match.groups()
+                                                logger.debug(f"Extracted release_id={rid}, image_id={image_id}")
+                                                
+                                                # 使用 build_caa_url 构建一致的 URL
+                                                images = {
+                                                    'small': self.build_caa_url(rid, image_id, size=250),
+                                                    'mid': self.build_caa_url(rid, image_id, size=500),
+                                                    'large': self.build_caa_url(rid, image_id, size=1200),
+                                                    'original': self.build_caa_url(rid, image_id)
+                                                }
+                                                
+                                                # 缓存结果
+                                                await util.RELEASE_IMAGE_CACHE.set(release_id, images, ttl=ttl)
+                                                results[result_index] = (images, expiry)
+                                                continue
+                                            else:
+                                                # 如果无法提取，只记录日志
+                                                logger.warning(f"Could not extract IDs from URL: {image_url}")
+                                        except Exception as e:
+                                            # 如果解析出错，只记录日志
+                                            logger.warning(f"Error parsing image URL: {e}")
+                                    else:
+                                        # 如果没有缩略图信息，只记录日志
+                                        logger.warning("No thumbnails or image found in response")
+                                    
+                                    # 如果无法从 release group 获取有效的封面，继续尝试其他方法
+                                    logger.debug(f"Failed to use release group cover art for release {release_id}")
+                                else:
+                                    logger.debug(f"No front image found for release group {rg_id}")
+                            else:
+                                logger.debug(f"No valid response or images found for release group {rg_id}")
+                                
+                        except Exception as e:
+                            logger.error(f"Error getting release group cover art for {rg_id}: {e}")
+                    else:
+                        logger.debug(f"No release group found for release {release_id}")
+                    
+                    # 如果所有尝试都失败，设置为空结果
+                    logger.debug(f"No cover art found for release {release_id} after all attempts")
                     results[result_index] = (None, now)
                     continue
-                    
-                cover_art_data = cover_art_data_dict[release_id]
-                if not cover_art_data or 'id' not in cover_art_data:
-                    logger.debug(f'Invalid cover art data for {release_id}')
-                    results[result_index] = (None, now)
-                    continue
-                    
-                image_id = cover_art_data['id']
-                images = {
-                    'small': self.build_caa_url(release_id, image_id, size=250),
-                    'mid': self.build_caa_url(release_id, image_id, size=500),
-                    'large': self.build_caa_url(release_id, image_id, size=1200),
-                    'original': self.build_caa_url(release_id, image_id)
-                }
+                else:
+                    logger.debug(f"Found cover art data for release {release_id}")
+                    cover_art_data = cover_art_data_dict[release_id]
+                    if not cover_art_data or 'id' not in cover_art_data:
+                        logger.debug(f'Invalid cover art data for {release_id}')
+                        results[result_index] = (None, now)
+                        continue
+                        
+                    logger.debug(f"Found cover art ID {cover_art_data['id']} for release {release_id}")
+                    image_id = cover_art_data['id']
+                    images = {
+                        'small': self.build_caa_url(release_id, image_id, size=250),
+                        'mid': self.build_caa_url(release_id, image_id, size=500),
+                        'large': self.build_caa_url(release_id, image_id, size=1200),
+                        'original': self.build_caa_url(release_id, image_id)
+                    }
                 
                 # 缓存结果
                 await util.RELEASE_IMAGE_CACHE.set(release_id, images, ttl=ttl)
                 results[result_index] = (images, expiry)
                 
+            logger.debug(f"Finished processing {len(uncached_ids)} release images")
             return results
             
-        except ProviderUnavailableException:
+        except ProviderUnavailableException as e:
             # 如果服务不可用，对所有未缓存的结果返回空列表
+            logger.error(f"Provider unavailable: {e}")
             error_expiry = now + timedelta(seconds=CONFIG.CACHE_TTL['provider_error'])
             for i in uncached_indices.values():
                 results[i] = (None, error_expiry)
