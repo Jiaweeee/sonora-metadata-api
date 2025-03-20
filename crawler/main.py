@@ -7,6 +7,7 @@ import sys
 import argparse
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
+from crawler.install_playwright import main as install_playwright
 
 
 def main():
@@ -24,8 +25,20 @@ def main():
     parser.add_argument('--loglevel', type=str, default='INFO',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Log level (default: INFO)')
+    parser.add_argument('--install-playwright', action='store_true',
+                        help='Install Playwright browsers before running')
+    parser.add_argument('--query', type=str, default=None,
+                        help='Search query for spiders that require it')
     
     args = parser.parse_args()
+    
+    # Install Playwright browsers if requested
+    if args.install_playwright:
+        print("Installing Playwright browsers...")
+        install_result = install_playwright()
+        if install_result != 0:
+            print("Failed to install Playwright browsers. Exiting.")
+            return install_result
     
     # Set up the crawler process
     settings = get_project_settings()
@@ -51,7 +64,13 @@ def main():
     
     # Start the crawler
     process = CrawlerProcess(settings)
-    process.crawl(args.spider)
+    
+    # Add spider arguments if provided
+    spider_kwargs = {}
+    if args.query:
+        spider_kwargs['query'] = args.query
+    
+    process.crawl(args.spider, **spider_kwargs)
     process.start()
     
     return 0

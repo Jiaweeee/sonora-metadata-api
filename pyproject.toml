@@ -57,6 +57,8 @@ wsproto = "1.1.0"
 yarl = "1.6.3"
 scrapy = "^2.11.0"
 itemadapter = "^0.8.0"
+playwright = "^1.42.0"
+scrapy-playwright = "^0.0.33"
 
 
 [tool.poetry.group.dev.dependencies]
