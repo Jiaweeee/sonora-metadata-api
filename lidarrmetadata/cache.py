@@ -301,6 +301,53 @@ order by x.key_sorter""",
                 'Limited': len(results) == limit,
                 'Items': [item['key'] for item in results]}
 
+    @conn
+    async def _get_all_keys_paged(self, limit, offset, _conn=None):
+        """
+        获取所有键，支持分页
+        
+        Args:
+            limit (int): 每页返回的最大记录数
+            offset (int): 分页偏移量
+            _conn: 数据库连接对象
+            
+        Returns:
+            dict: 包含键列表、总记录数和是否有更多数据的字典
+        """
+        start = timer()
+        
+        # 先获取总记录数
+        count_result = await _conn.fetchrow(
+            f"SELECT COUNT(*) as total FROM {self._db_table}"
+        )
+        total_count = count_result['total']
+        
+        # 获取指定页的键
+        results = await _conn.fetch(
+            f"SELECT key FROM {self._db_table} "
+            "ORDER BY key "  # 按键名排序，确保分页结果一致
+            "LIMIT $1 OFFSET $2",
+            limit, offset
+        )
+        
+        keys = [item['key'] for item in results] if results else []
+        
+        end = timer()
+        elapsed = int((end - start) * 1000)
+        
+        # 计算是否有更多数据
+        has_more = offset + len(keys) < total_count
+        
+        logger.debug(f"获取了 {len(keys)} 个键，偏移量={offset}，总数={total_count}，耗时={elapsed}ms")
+        
+        return {
+            'keys': keys,
+            'total': total_count,
+            'offset': offset,
+            'limit': limit,
+            'has_more': has_more
+        }
+
 class PostgresCache(PostgresBackend, BaseCache):
     """
     Cache implementation using postgres table
@@ -317,6 +364,20 @@ class PostgresCache(PostgresBackend, BaseCache):
 
     async def get_recently_updated(self, updated_since, limit, _conn=None):
         return await self._get_recently_updated(updated_since, limit, _conn=_conn)
+        
+    async def get_all_keys_paged(self, limit=1000, offset=0, _conn=None):
+        """
+        获取所有缓存键，支持分页
+        
+        Args:
+            limit (int): 每页返回的最大记录数，默认1000
+            offset (int): 分页偏移量，默认0
+            _conn: 数据库连接对象
+            
+        Returns:
+            dict: 包含键列表、总记录数和是否有更多数据的字典
+        """
+        return await self._get_all_keys_paged(limit, offset, _conn=_conn)
 
 
 class NullCache(BaseCache):
@@ -338,3 +399,23 @@ class NullCache(BaseCache):
     
     async def get_stale(self, count, expires_before, _conn=None):
         return []
+        
+    async def get_all_keys_paged(self, limit=1000, offset=0, _conn=None):
+        """
+        获取所有缓存键，支持分页 (空实现)
+        
+        Args:
+            limit (int): 每页返回的最大记录数，默认1000
+            offset (int): 分页偏移量，默认0
+            _conn: 数据库连接对象
+            
+        Returns:
+            dict: 包含空键列表和元数据的字典
+        """
+        return {
+            'keys': [],
+            'total': 0,
+            'offset': offset,
+            'limit': limit,
+            'has_more': False
+        }

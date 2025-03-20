@@ -35,12 +35,12 @@ CACHE = caches.get('default')
 FANART_CACHE = caches.get('fanart')
 WIKI_CACHE = caches.get('wikipedia')
 ARTIST_CACHE = caches.get('artist')
-ALBUM_CACHE = caches.get('album') # TODO: delete
 SPOTIFY_CACHE = caches.get('spotify')
 # New
 RELEASE_IMAGE_CACHE = caches.get('release_image')
 RELEASE_CACHE = caches.get('release')
 TRACK_CACHE = caches.get('track')
+ARTIST_IMAGE_CACHE = caches.get('artist_image')
 
 def first_key_item(dictionary, key, default=None):
     """
@@ -50,6 +50,9 @@ def first_key_item(dictionary, key, default=None):
     :param default: Default value to use
     :return: First item or default
     """
+    if not dictionary:
+        return default
+    
     value = dictionary.get(key, default)
 
     if value and value != default and hasattr(value, '__getitem__'):

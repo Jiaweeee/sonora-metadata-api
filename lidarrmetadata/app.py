@@ -15,6 +15,7 @@ import aiohttp
 from timeit import default_timer as timer
 from spotipy import SpotifyException
 import Levenshtein
+from dateutil import parser
 
 import lidarrmetadata
 from lidarrmetadata import api
@@ -301,24 +302,7 @@ def format_search_result(item, entity_type):
     Returns:
         Formatted search result
     """
-    # 处理 image
-    image = None
-    images = item.get('images', [])
-    if images:
-        # TODO: 支持从多种数据源获取 artist image
-        if entity_type == 'artist':
-            # Artist 的图片处理逻辑
-            image_map = {}
-            for img in images:
-                image_map[img['CoverType']] = img['Url']
-            if image_map.get('Poster'):
-                image = image_map['Poster']
-            elif image_map.get('Fanart'):
-                image = image_map['Fanart']
-        else:
-            # Release 和 Track 的图片处理逻辑
-            if isinstance(images, dict) and 'small' in images:
-                image = images['small']
+    image = item.get('images', {}).get('small', None)
 
     # 处理艺术家信息
     artist_name = None
@@ -537,7 +521,6 @@ async def invalidate_cache():
         ## Use set rather than expires so that we add entries for new items also
         await asyncio.gather(
             util.ARTIST_CACHE.multi_set([(artist, None) for artist in artists], ttl=0, timeout=None),
-            util.ALBUM_CACHE.multi_set([(album, None) for album in albums], ttl=0, timeout=None),
             util.SPOTIFY_CACHE.multi_set([(spotify_artist, None) for spotify_artist in spotify_artists], ttl=0, timeout=None),
             util.SPOTIFY_CACHE.multi_set([(spotify_album, None) for spotify_album in spotify_albums], ttl=0, timeout=None)
         )

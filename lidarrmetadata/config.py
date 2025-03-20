@@ -376,6 +376,13 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
             'db_table': 'track',
             'timeout': 0,
         },
+        'artist_image': {
+            'cache': 'lidarrmetadata.cache.PostgresCache',
+            'endpoint': POSTGRES_CACHE_HOST,
+            'port': POSTGRES_CACHE_PORT,
+            'db_table': 'artist_image',
+            'timeout': 0,
+        }
     }
 
     CRAWLER_BATCH_SIZE = {
@@ -433,6 +440,12 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
             }
         },
         'track': {
+            'cache': 'lidarrmetadata.cache.NullCache',
+            'serializer': {
+                'class': 'lidarrmetadata.cache.ExpirySerializer'
+            }
+        },
+        'artist_image': {
             'cache': 'lidarrmetadata.cache.NullCache',
             'serializer': {
                 'class': 'lidarrmetadata.cache.ExpirySerializer'

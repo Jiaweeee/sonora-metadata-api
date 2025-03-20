@@ -18,8 +18,7 @@ import asyncio
 import aiohttp
 import asyncpg
 import json
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
+import base64
 
 import dateutil.parser
 
@@ -135,9 +134,16 @@ class ArtistByIdMixin(MixinBase):
         pass
 
     @abc.abstractmethod
-    def get_all_spotify_mappings(self):
+    def get_spotify_mappings(self, limit=100, offset=0):
         """
-        Grabs all link entities from database and parses for spotify maps
+        Grabs link entities from database and parses for spotify maps with pagination support
+        
+        Args:
+            limit (int): 每页返回的最大记录数量，默认100条
+            offset (int): 分页偏移量，默认从0开始
+            
+        Returns:
+            A list of (mbid, spotify_id) tuples for the requested page
         """
         pass
 
@@ -379,20 +385,6 @@ class ArtistArtworkMixin(MixinBase):
         pass
 
 
-class AlbumArtworkMixin(MixinBase):
-    """
-    Gets art for album
-    """
-
-    @abc.abstractmethod
-    def get_album_images(self, album_id):
-        """
-        Gets images for album with ID
-        :param album_id: ID of album
-        :return: List of results
-        """
-        pass
-
 class ReleaseArtworkMixin(MixinBase):
     """
     Gets art for release
@@ -509,19 +501,6 @@ class AsyncDel(MixinBase):
         """
         pass
 
-class SpotifyIdMixin(MixinBase):
-    """
-    Details for a spotify id
-    """
-    
-    @abc.abstractmethod
-    def album_from_artist(self, artist_id):
-        pass
-
-    @abc.abstractmethod
-    def album(self, album_id):
-        pass
-
     
 class ProviderMeta(abc.ABCMeta):
     def __new__(mcls, name, bases, namespace):
@@ -550,19 +529,31 @@ class Provider(six.with_metaclass(ProviderMeta, object)):
         logger.info('Initializing provider {}'.format(self.__class__))
         self.providers.append(self)
         
-class ProviderUnavailableException(Exception):
-    """ Thown on error for providers we can cope without """
+class ProviderException(Exception):
+    """
+    Base exception for providers
+    """
     pass
 
-class NonRetryableError(Exception):
+class ProviderNotFoundException(ProviderException):
     """
-    表示不应该重试的 HTTP 错误
-    
-    此异常用于立即中断重试流程，对于那些已知重试不会成功的错误（如 404、401 等）
+    Exception for when searching yields no results
+    """
+    pass
+
+class ProviderUnavailableException(ProviderException):
+    """
+    Exception for when the provider is temporarily unavailable
+    """
+    pass
+
+class NonRetryableError(ProviderException):
+    """
+    Exception indicating an error response that should not be retried
     """
     def __init__(self, response):
         self.response = response
-        super().__init__(f"Non-retryable HTTP error: {response.status}")
+        super(NonRetryableError, self).__init__(f"Non-retryable error: {response.status}")
 
 class HttpProvider(Provider,
                    AsyncDel):
@@ -905,8 +896,7 @@ class CoverArtArchiveProvider(HttpProvider, ReleaseArtworkMixin):
         base_url = f'https://imagecache.lidarr.audio/v1/caa/{release_id}/{image_id}'
         return f'{base_url}-{size}.jpg' if size else f'{base_url}.jpg'
 
-class FanArtTvProvider(HttpProvider, 
-                       AlbumArtworkMixin, 
+class FanArtTvProvider(HttpProvider,
                        ArtistArtworkMixin,
                        InvalidateCacheMixin):
     def __init__(self,
@@ -936,9 +926,6 @@ class FanArtTvProvider(HttpProvider,
         
         return await self.get_images(artist_id, self.parse_artist_images)
         
-    async def get_album_images(self, album_id):
-        
-        return await self.get_images(album_id, self.parse_album_images)
         
     async def get_images(self, mbid, handler):
 
@@ -1070,30 +1057,23 @@ class FanArtTvProvider(HttpProvider,
         return url
 
     @staticmethod
-    def parse_album_images(response):
-        """
-        Parses album images to our expected format
-        :param response: API response
-        :return: List of images in our expected format
-        """
-        images = {'Cover': util.first_key_item(response, 'albumcover'),
-                  'Disc': util.first_key_item(response, 'cdart')}
-        return [{'CoverType': key, 'Url': value['url']}
-                for key, value in images.items() if value]
-
-    @staticmethod
     def parse_artist_images(response):
         """
-        Parses artist images to our expected format
-        :param response: API response
-        :return: List of images in our expected format
+        解析艺术家图片为统一格式
+        :param response: API 响应数据
+        :return: 包含 small 字段的字典: {'small': url 或 None}
         """
-        images = {'Banner': util.first_key_item(response, 'musicbanner'),
-                  'Fanart': util.first_key_item(response, 'artistbackground'),
-                  'Logo': util.first_key_item(response, 'hdmusiclogo'),
-                  'Poster': util.first_key_item(response, 'artistthumb')}
-        return [{'CoverType': key, 'Url': value['url']}
-                for key, value in images.items() if value]
+        # 从响应获取缩略图
+        thumb = util.first_key_item(response, 'artistthumb')
+        url = thumb['url'] if thumb else None
+        
+        # 只返回 small 字段
+        return {
+            'small': url,
+            'mid': url,
+            'large': url,
+            'original': url
+        }
 
 class SpotifyAuthProvider(HttpProvider,
                           SpotifyAuthMixin):
@@ -1427,10 +1407,19 @@ class MusicbrainzDbProvider(Provider,
             return results[0]['gid']
         return None
 
-    async def get_all_spotify_mappings(self):
-        return await self.query_from_file('all_spotify_maps.sql')
-        # return results
-        # return [{'mbid': item['gid'], 'spotifyid': item['spotifyid']} for item in results]
+    async def get_spotify_mappings(self, limit=100, offset=0):
+        """
+        获取Spotify ID与MusicBrainz ID的映射关系，支持分页
+        
+        Args:
+            limit (int): 每页返回的最大记录数量，默认100条
+            offset (int): 分页偏移量，默认从0开始
+            
+        Returns:
+            A list of mappings with mbid and spotifyid for the requested page
+        """
+        results = await self.query_from_file('artist_spotify_maps_paged.sql', limit, offset)
+        return results
     
     @deprecated('Use get_artist_ids_paged instead.')
     async def get_all_artist_ids(self):
@@ -1650,41 +1639,220 @@ class MusicbrainzDbProvider(Provider,
         except IndexError:
             return domain
 
-class SpotifyProvider(Provider,
-                      SpotifyIdMixin):
+class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
     """
     Provider to get details for a spotify id
+    
+    使用直接HTTP请求而非spotipy库与Spotify API交互
+    实现了自动获取和刷新访问令牌的功能
     """
 
     def __init__(self, client_id, client_secret):
-        super(SpotifyProvider, self).__init__()
+        """
+        初始化Spotify提供程序
         
-        client_credentials_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
-        self.spotify = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
-
-    def album_from_artist(self, artist_id):
-        top_tracks = self.spotify.artist_top_tracks(artist_id, country='US')
-
-        if not top_tracks['tracks']:
-            return None
-
-        album = top_tracks['tracks'][0]['album']
-        artist = album['artists'][0]
-
-        return {'Artist': artist['name'],
-                'ArtistSpotifyId': artist_id,
-                'Album': album['name'],
-                'AlbumSpotifyId': album['id']}
-
-    def album(self, album_id):
-        album = self.spotify.album(album_id)
-        artist = album['artists'][0]
+        Args:
+            client_id: Spotify应用客户端ID
+            client_secret: Spotify应用客户端密钥
+        """
+        super(SpotifyProvider, self).__init__('spotify')
         
-        return {'Artist': artist['name'],
-                'ArtistSpotifyId': artist['id'],
-                'Album': album['name'],
-                'AlbumSpotifyId': album_id}
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._token = None
+        self._token_expires = 0
+        self._token_lock = asyncio.Lock()
+        self._api_base_url = "https://api.spotify.com/v1"
         
+    async def _ensure_token(self):
+        """
+        确保有一个有效的访问令牌，如果令牌过期则刷新
+        
+        Returns:
+            str: 有效的访问令牌
+        """
+        now = datetime.datetime.now().timestamp()
+        
+        # 使用锁确保只有一个协程可以刷新令牌
+        async with self._token_lock:
+            # 检查令牌是否已过期或即将过期(留5分钟的缓冲时间)
+            if not self._token or now > (self._token_expires - 300):
+                logger.debug("获取新的Spotify访问令牌")
+                await self._get_new_token()
+                
+        return self._token
+    
+    async def _get_new_token(self):
+        """
+        从Spotify获取新的访问令牌
+        """
+        auth = base64.b64encode(f"{self._client_id}:{self._client_secret}".encode()).decode()
+        headers = {
+            "Authorization": f"Basic {auth}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        data = {"grant_type": "client_credentials"}
+        
+        try:
+            session = await self._get_session()
+            async with session.post("https://accounts.spotify.com/api/token", 
+                                    headers=headers, 
+                                    data=data) as response:
+                
+                response.raise_for_status()
+                token_data = await response.json()
+                
+                self._token = token_data.get("access_token")
+                expires_in = token_data.get("expires_in", 3600)  # 默认1小时
+                
+                # 设置过期时间
+                self._token_expires = datetime.datetime.now().timestamp() + expires_in
+                logger.debug(f"获取到新的Spotify令牌，将在{expires_in}秒后过期")
+                
+        except Exception as e:
+            logger.error(f"获取Spotify令牌失败: {str(e)}")
+            raise ProviderUnavailableException(f"Failed to get Spotify token: {str(e)}")
+    
+    async def _api_request(self, endpoint, params=None, retries=2):
+        """
+        向Spotify API发送请求
+        
+        Args:
+            endpoint: API端点路径（不含基础URL）
+            params: 请求参数字典
+            retries: 重试次数
+            
+        Returns:
+            dict: API响应数据
+        """
+        url = f"{self._api_base_url}/{endpoint}"
+        
+        for attempt in range(retries + 1):
+            # 获取令牌
+            token = await self._ensure_token()
+            headers = {"Authorization": f"Bearer {token}"}
+            
+            try:
+                session = await self._get_session()
+                async with session.get(url, headers=headers, params=params) as response:
+                    # 处理401错误（令牌失效）
+                    if response.status == 401 and attempt < retries:
+                        logger.debug("Spotify令牌过期，正在刷新")
+                        async with self._token_lock:
+                            self._token_expires = 0  # 强制刷新令牌
+                            await self._ensure_token()
+                        continue  # 重试请求
+                        
+                    # 处理429错误（限流）
+                    if response.status == 429 and attempt < retries:
+                        retry_after = int(response.headers.get("Retry-After", "5"))
+                        logger.warning(f"Spotify API限流，等待 {retry_after} 秒后重试")
+                        await asyncio.sleep(retry_after)
+                        continue  # 重试请求
+                    
+                    # 其他错误状态码
+                    if not response.ok:
+                        response.raise_for_status()  # 这会引发ClientResponseError异常
+                        
+                    # 正常情况，返回JSON响应
+                    return await response.json()
+                        
+            except aiohttp.ClientResponseError as e:
+                if attempt < retries:
+                    logger.warning(f"Spotify API响应错误，尝试重试 ({attempt+1}/{retries}): {str(e)}")
+                    await asyncio.sleep(1)
+                    continue
+                logger.error(f"Spotify API响应错误: {str(e)}")
+                raise ProviderUnavailableException(f"Spotify API response error: {str(e)}")
+                
+            except aiohttp.ClientError as e:
+                if attempt < retries:
+                    logger.warning(f"Spotify API连接错误，尝试重试 ({attempt+1}/{retries}): {str(e)}")
+                    await asyncio.sleep(1)
+                    continue
+                logger.error(f"Spotify API连接错误: {str(e)}")
+                raise ProviderUnavailableException(f"Spotify API connection error: {str(e)}")
+                
+            except Exception as e:
+                logger.error(f"Spotify API请求未预期错误: {str(e)}")
+                raise ProviderUnavailableException(f"Spotify API unexpected error: {str(e)}")
+                
+        # 如果达到这里，说明所有重试都失败了
+        raise ProviderUnavailableException(f"Spotify API request failed after {retries+1} attempts")
+    
+    async def get_artist_images(self, artist_id):
+        """
+        获取艺术家的图片信息
+        
+        从Spotify API获取艺术家图片，并按相对大小分类
+        
+        Args:
+            artist_id (str): Spotify艺术家ID
+            
+        Returns:
+            图片字典包含不同尺寸的图片URL:
+            {
+                'small': <最小分辨率图片的url>,
+                'mid': <中等分辨率图片的url>,
+                'large': <最大分辨率图片的url>
+            }
+        """
+        try:
+            logger.debug(f"请求Spotify艺术家图片: {artist_id}")
+            start_time = timer()
+            
+            # 获取艺术家数据
+            artist_data = await self._api_request(f"artists/{artist_id}")
+            
+            logger.debug(f"Spotify API请求完成，耗时: {timer() - start_time:.2f}秒")
+            
+            if not artist_data or 'images' not in artist_data or not artist_data['images']:
+                logger.debug(f"未找到艺术家图片: {artist_id}")
+                return {}, utcnow() + timedelta(seconds=CONFIG.CACHE_TTL['provider_error'])
+            
+            # 获取所有图片并按尺寸排序
+            images_list = sorted(
+                artist_data['images'], 
+                key=lambda img: img.get('height', 0) * img.get('width', 0),  # 按面积排序
+                reverse=True  # 从大到小排序
+            )
+            
+            result = {}
+            
+            # 如果有图片，将最大的作为large
+            if len(images_list) > 0:
+                result['large'] = images_list[0]['url']
+            
+            # 如果有至少2张图片，将中间的作为mid
+            if len(images_list) > 2:
+                result['mid'] = images_list[len(images_list) // 2]['url']
+            elif len(images_list) > 1:
+                result['mid'] = images_list[1]['url']
+            elif 'large' in result:
+                # 如果只有一张图片，将large作为mid
+                result['mid'] = result['large']
+            
+            # 如果有至少3张图片，将最小的作为small
+            if len(images_list) >= 3:
+                result['small'] = images_list[-1]['url']
+            elif len(images_list) > 1:
+                # 如果只有两张图片，将较小的作为small
+                result['small'] = images_list[-1]['url']
+            elif 'mid' in result:
+                # 如果只有一张图片，将mid作为small
+                result['small'] = result['mid']
+            
+            cache_ttl = CONFIG.CACHE_TTL.get('spotify', 60 * 60 * 24)  # 默认1天
+            expiry = utcnow() + timedelta(seconds=cache_ttl)
+            
+            return result, expiry
+            
+        except Exception as e:
+            logger.error(f"获取Spotify艺术家图片失败: {artist_id}, 错误: {str(e)}")
+            error_ttl = CONFIG.CACHE_TTL.get('provider_error', 60 * 10)  # 默认10分钟
+            return {}, utcnow() + timedelta(seconds=error_ttl)
+
+
 class WikipediaProvider(HttpProvider, ArtistOverviewMixin):
     """
     Provider for querying wikipedia

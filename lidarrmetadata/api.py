@@ -151,19 +151,9 @@ async def get_artist_info_multi(mbids):
             images, expiry = results[i]
             artist['data']['images'] = images
             artist['expiry'] = min(artist['expiry'], expiry)
-
-        if len(artist_art_providers) > 1:
-            image_types = {'Banner', 'Fanart', 'Logo', 'Poster'}
-            artists_without_images = [x for x in artists if not x['data']['images'] or not image_types.issubset({i['CoverType'] for i in x['data']['images']})]
-            results = await asyncio.gather(*[artist_art_providers[1].get_artist_images(x['data']['id']) for x in artists_without_images])
-
-            for i, artist in enumerate(artists_without_images):
-                images, expiry = results[i]
-                artist['data']['images'] = combine_images(artist['data']['images'], images)
-                artist['expiry'] = min(artist['expiry'], expiry)
     else:
         for artist in artists:
-            artist['images'] = []
+            artist['images'] = None
 
     # Get overview results
     results = await overviews_task
@@ -263,73 +253,6 @@ class ReleaseGroupNotFoundException(Exception):
         super().__init__(f"Album not found: {mbid}")
         self.mbid = mbid
 
-@postgres_cache(util.ALBUM_CACHE)
-async def get_release_group_info_basic(mbid):
-    
-    release_groups = await get_release_group_info_multi([mbid])
-    if not release_groups:
-
-        album_provider = provider.get_providers_implementing(provider.ReleaseGroupByIdMixin)[0]
-        new_id = await album_provider.redirect_old_release_group_id(mbid)
-        release_groups = await get_release_group_info_multi([new_id])
-
-        if not release_groups:
-            raise ReleaseGroupNotFoundException(mbid)
-    
-    return release_groups[0]
-
-async def get_release_group_info_multi(mbids):
-    
-    start = timer()
-    
-    release_group_providers = provider.get_providers_implementing(provider.ReleaseGroupByIdMixin)
-    album_art_providers = provider.get_providers_implementing(provider.AlbumArtworkMixin)
-    
-    if not release_group_providers:
-        raise MissingProviderException('No album provider available')
-
-    expiry = provider.utcnow() + timedelta(seconds = CONFIG.CACHE_TTL['cloudflare'])
-
-    # Do the main DB query
-    release_groups = await release_group_providers[0].get_release_groups_by_id(mbids)
-    if not release_groups:
-        return None
-
-    # Add in default expiry
-    release_groups = [{'data': rg, 'expiry': expiry} for rg in release_groups]
-    
-    # Start overviews
-    overviews_task = asyncio.gather(*[get_overview(rg['data']['links']) for rg in release_groups])
-    
-    # Get fanart images (and prefer those if possible)
-    if album_art_providers:
-        results = await asyncio.gather(*[album_art_providers[0].get_album_images(x['data']['id']) for x in release_groups])
-        
-        for i, rg in enumerate(release_groups):
-            images, expiry = results[i]
-            rg['data']['images'] = combine_images(images, rg['data']['images'])
-            rg['expiry'] = min(rg['expiry'], expiry)
-
-    # Get overview results
-    results = await overviews_task
-    for i, rg in enumerate(release_groups):
-        overview, expiry = results[i]
-        rg['data']['overview'] = overview
-        rg['expiry'] = min(rg['expiry'], expiry)
-    
-    logger.debug(f"Got basic album info for {len(mbids)} albums in {(timer() - start) * 1000:.0f}ms ")
-
-    return [(item['data'], item['expiry']) for item in release_groups]
-
-async def get_release_group_info(mbid):
-
-    release_group, rg_expiry = await get_release_group_info_basic(mbid)
-    artists, artist_expiry = await get_release_group_artists(release_group)
-    
-    release_group['artists'] = artists
-    del release_group['artistids']
-    
-    return release_group, min(rg_expiry, artist_expiry)
 
 async def get_release_info_basic(mbid):
     release_provider = provider.get_providers_implementing(provider.ReleaseByIdMixin)[0]
