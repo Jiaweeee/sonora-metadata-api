@@ -21,6 +21,7 @@ httptools==0.1.1
 Hypercorn==0.13.2
 hyperframe==6.0.1
 idna==2.10
+itemadapter==0.8.0
 itsdangerous==2.0.0a1
 Jinja2==3.0.0a1
 MarkupSafe==2.0.0a1
@@ -38,6 +39,7 @@ sentry-sdk==0.19.5
 six==1.15.0
 soupsieve==2.3.2.post1
 spotipy==2.16.1
+Scrapy==2.11.0
 toml==0.10.2
 typing-extensions==3.7.4.3
 urllib3==1.26.9

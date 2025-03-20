@@ -55,6 +55,8 @@ uvloop = "0.14.0"
 werkzeug = "1.0.1"
 wsproto = "1.1.0"
 yarl = "1.6.3"
+scrapy = "^2.11.0"
+itemadapter = "^0.8.0"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -68,4 +70,4 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 lidarr-metadata-server = "lidarrmetadata.server:main"
-lidarr-metadata-crawler = "lidarrmetadata.crawler:main"
+lidarr-metadata-crawler = "crawler.main:main"
