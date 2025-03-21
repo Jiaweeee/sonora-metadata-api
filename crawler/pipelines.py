@@ -41,7 +41,14 @@ class ArtistImageCachePipeline:
                     try:
                         # Set TTL according to config
                         ttl = util.CONFIG.CACHE_TTL.get('artist_image', 60 * 60 * 24 * 30)  # Default 30 days
-                        await self.artist_image_cache.set(item['mbid'], item['image_url'], ttl=ttl)
+                        url = item['image_url']
+                        value = {
+                            'small': url,
+                            'mid': url,
+                            'large': url,
+                            'original': url
+                        }
+                        await self.artist_image_cache.set(item['mbid'], value, ttl=ttl)
                         return True
                     except Exception as e:
                         spider.logger.error(f"Error in save_to_cache: {e}")
@@ -49,6 +56,7 @@ class ArtistImageCachePipeline:
                 
                 # Simulating the async call
                 # In production: self.loop.run_until_complete(save_to_cache())
+                self.loop.run_until_complete(save_to_cache())
                 spider.logger.info(f"Would save image URL for artist {item}")
                 
             except Exception as e:

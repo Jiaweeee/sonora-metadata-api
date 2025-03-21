@@ -233,13 +233,7 @@ class SpotifyArtistImageSpider(scrapy.Spider):
                     
                     # Generate search request
                     yield self.generate_search_request(mbid, artist_name, spotify_ids)
-                    # 增加处理计数
-                    self.stats['total_processed'] += 1
                     
-                    # 每批次结束时打印当前统计
-                    if self.stats['total_processed'] % 10 == 0:
-                        self._log_stats()
-                
                 # 更新offset为下一批次
                 current_offset += self.batch_size
                 self.logger.info(f"Moving to next batch at offset {current_offset}")
@@ -277,9 +271,12 @@ class SpotifyArtistImageSpider(scrapy.Spider):
                 "playwright": True,
                 "playwright_include_page": True,
                 "playwright_page_methods": [
-                    # Wait until network is idle - good indicator that dynamic content has loaded
-                    # PageMethod("wait_for_load_state", "networkidle")
+                    # Wait for network to be idle to ensure content is loaded
+                    PageMethod("wait_for_load_state", "networkidle"),
                 ],
+                "playwright_context_args": {
+                    "storage_state": {}  # 使用空状态来避免保存登录信息或其他状态
+                },
                 "errback": self.errback,
                 "mbid": mbid,
                 "artist_name": artist_name,
@@ -302,70 +299,54 @@ class SpotifyArtistImageSpider(scrapy.Spider):
         self.logger.info(f"Parsing search results for {artist_name} (MBID: {mbid})")
         
         try:
-            # For each Spotify ID, try to find a matching card
+            # Find artists in the grid container
             image_url = None
             
-            for spotify_id in spotify_ids:
-                self.logger.info(f"Looking for Spotify ID: {spotify_id}")
+            try:
+                # Get the grid container with artist results
+                grid_container = await page.query_selector('div[data-testid="grid-container"]')
                 
-                # First, try the data-encore-id approach (as seen in the example HTML)
-                # Look for any element with attributes containing the Spotify ID
-                selectors = [
-                    f"[data-testid*='{spotify_id}']",
-                    f"[aria-labelledby*='{spotify_id}']",
-                    f"[id*='{spotify_id}']",
-                    f"[data-encore-id='card'][aria-labelledby*='{spotify_id}']",
-                    f"[role='group'][aria-labelledby*='{spotify_id}']"
-                ]
-                
-                for selector in selectors:
-                    self.logger.info(f"Trying selector: {selector}")
-                    elements = await page.query_selector_all(selector)
+                if grid_container:
+                    # Get all artist cards (each in a span with role="presentation")
+                    artist_cards = await grid_container.query_selector_all('span[role="presentation"]')
                     
-                    if elements:
-                        self.logger.info(f"Found {len(elements)} elements with selector: {selector}")
-                        
-                        # Process each element to find an image
-                        for element in elements:
-                            # First, try to find an image directly within this element
-                            img = await element.query_selector("img")
+                    self.logger.info(f"Found {len(artist_cards)} artist cards in search results")
+                    
+                    # Process each artist card
+                    for card in artist_cards:
+                        try:
+                            # Find the artist link within the card
+                            artist_link = await card.query_selector('a[href^="/artist/"]')
                             
-                            if img:
-                                src = await img.get_attribute('src')
-                                if src:
-                                    self.logger.info(f"Found image with src: {src}")
-                                    image_url = src
-                                    break
-                
-                # If no image found yet, try a page-wide search
-                # if not image_url:
-                #     # Dump the page HTML for debugging (only in development)
-                #     if not image_url:
-                #         self.logger.info("No image found with direct selectors, trying page content analysis")
-                        
-                #         # Take a screenshot for debugging
-                #         await page.screenshot(path=f"debug_{spotify_id}.png")
-                        
-                #         # Try to find any card with an image
-                #         cards = await page.query_selector_all("[data-encore-id='card']")
-                #         self.logger.info(f"Found {len(cards)} cards on the page")
-                        
-                #         for card in cards:
-                #             card_html = await page.evaluate("(element) => element.outerHTML", card)
-                            
-                #             # Check if this card contains the Spotify ID
-                #             if spotify_id in card_html:
-                #                 self.logger.info(f"Found card containing Spotify ID: {spotify_id}")
-                #                 img = await card.query_selector("img")
-                #                 if img:
-                #                     src = await img.get_attribute('src')
-                #                     if src:
-                #                         self.logger.info(f"Found image with src: {src}")
-                #                         image_url = src
-                #                         break
-                
-                if image_url:
-                    break
+                            if artist_link:
+                                # Get the href attribute to extract Spotify ID
+                                href = await artist_link.get_attribute('href')
+                                if href:
+                                    # Extract spotify ID from href (format: /artist/ID)
+                                    link_spotify_id = href.split('/')[-1]
+                                    # self.logger.info(f"Found artist link with Spotify ID: {link_spotify_id}")
+                                    
+                                    # Check if this ID matches any of our target IDs
+                                    if link_spotify_id in spotify_ids:
+                                        self.logger.info(f"Matched Spotify ID: {link_spotify_id}")
+                                        
+                                        # Find the image within this card
+                                        img = await card.query_selector('img')
+                                        if img:
+                                            src = await img.get_attribute('src')
+                                            if src:
+                                                self.logger.info(f"Found image for matching artist: {src}")
+                                                image_url = src
+                                                break
+                        except Exception as card_error:
+                            self.logger.warning(f"Error processing artist card: {card_error}")
+                else:
+                    self.logger.warning("Could not find grid container with artist results")
+            except Exception as e:
+                self.logger.error(f"Error searching for artist image: {e}")
+            
+            # 增加处理计数 - 在请求处理完成后
+            self.stats['total_processed'] += 1
             
             # If we found an image URL, yield an item
             if image_url:
@@ -386,11 +367,22 @@ class SpotifyArtistImageSpider(scrapy.Spider):
             else:
                 self.logger.warning(f"No image found for artist {artist_name} (MBID: {mbid})")
             
+            # 每处理10个请求打印统计信息
+            if self.stats['total_processed'] % 10 == 0:
+                self._log_stats()
+                
         except Exception as e:
             self.logger.error(f"Error parsing search results: {e}")
+            # 即使发生错误，也增加处理计数
+            self.stats['total_processed'] += 1
+        
         finally:
-            # Always close the page to avoid memory leaks
-            await page.close()
+            # 无论成功或失败，都关闭页面
+            try:
+                await page.close()
+                self.logger.info(f"Closed page for artist {artist_name}")
+            except Exception as close_error:
+                self.logger.error(f"Error closing page: {close_error}")
 
     async def errback(self, failure):
         """
@@ -400,13 +392,14 @@ class SpotifyArtistImageSpider(scrapy.Spider):
             failure: The failure information
         """
         page = failure.request.meta.get("playwright_page")
+        
         if page:
             await page.close()
             
         mbid = failure.request.meta.get("mbid", "unknown")
         artist_name = failure.request.meta.get("artist_name", "unknown")
         
-        self.logger.error(f"Error processing artist {artist_name} (MBID: {mbid}): {failure}") 
+        self.logger.error(f"Error processing artist {artist_name} (MBID: {mbid}): {failure}")
 
     def _log_stats(self):
         """输出当前统计信息到日志"""
