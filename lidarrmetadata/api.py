@@ -374,7 +374,7 @@ async def get_release_search_results(query, limit, artist_name=''):
             def get_artists(artist_credit):
                 if not artist_credit:
                     return []
-                return [artist['name'] for artist in artist_credit]
+                return [artist.get('artist', {}).get('name', '') for artist in artist_credit]
 
             def get_type(release_group):
                 if not release_group or 'primary-type' not in release_group:
