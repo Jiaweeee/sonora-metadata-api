@@ -711,15 +711,8 @@ async def get_track_chart(chart_name):
 async def get_artist_chart(chart_name):
     def format_artist(artist):
         images = artist.get('images', None)
-        image = None
-        if images:
-            image_map = {}
-            for img in images:
-                image_map[img['CoverType']] = img['Url']
-            if image_map.get('Poster'):
-                image = image_map['Poster']
-            elif image_map.get('Fanart'):
-                image = image_map['Fanart']
+        image = images.get('small') if images else None
+        
         return {
             'id': artist['id'],
             'title': artist['name'],
