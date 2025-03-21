@@ -42,4 +42,14 @@ class TrackItem(scrapy.Item):
     duration = scrapy.Field()
     track_number = scrapy.Field()
     disc_number = scrapy.Field()
-    release_date = scrapy.Field() 
+    release_date = scrapy.Field()
+
+
+class ArtistImageItem(scrapy.Item):
+    """
+    Item for storing artist image data.
+    """
+    mbid = scrapy.Field()           # Artist's MusicBrainz ID
+    spotify_ids = scrapy.Field()    # Artist's Spotify ID list
+    artist_name = scrapy.Field()    # Artist name
+    image_url = scrapy.Field()      # Image URL 
