@@ -182,7 +182,7 @@ right join
 (
     select key, row_number() over() as key_sorter
     from (select unnest($1::text[]) as key) as y
-) x on x.key = spotify.key
+) x on x.key = {self._db_table}.key
 order by x.key_sorter""",
                 keys
             )

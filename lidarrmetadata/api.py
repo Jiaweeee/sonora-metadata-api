@@ -7,6 +7,7 @@ import re
 from datetime import datetime, date, timedelta
 from timeit import default_timer as timer
 from aiocache import cached
+from quart import jsonify
 
 
 from lidarrmetadata import config
@@ -223,7 +224,7 @@ async def get_artist_releases(mbid):
     
     # 第二步：批量获取所有 release 的封面
     if all_releases:
-        art_provider = provider.get_providers_implementing(provider.ReleaseArtworkMixin)[0]
+        art_provider = provider.get_providers_implementing(provider.CacheReleaseImageProvider)[0]
         release_ids = [release['id'] for release in all_releases]
         image_results = await art_provider.get_release_images_multi(release_ids)
         
@@ -331,7 +332,7 @@ def get_artist_streaming_links(links):
     return streaming_links if streaming_links else None
 
 async def get_release_images(mbid):
-    image_provider = provider.get_providers_implementing(provider.ReleaseArtworkMixin)[0]
+    image_provider = provider.get_providers_implementing(provider.CacheReleaseImageProvider)[0]
     return await image_provider.get_release_images(mbid)
 
 
@@ -390,7 +391,7 @@ async def get_release_search_results(query, limit, artist_name=''):
             })
             
         # 批量获取封面
-        art_providers = provider.get_providers_implementing(provider.ReleaseArtworkMixin)
+        art_providers = provider.get_providers_implementing(provider.CacheReleaseImageProvider)
         if art_providers:
             release_ids = [r['id'] for r in search_result]
             image_results = await art_providers[0].get_release_images_multi(release_ids)
@@ -488,7 +489,7 @@ async def get_track_search_results(query, limit, artist_name=''):
         
         # 批量获取图片
         if release_ids:
-            art_provider = provider.get_providers_implementing(provider.ReleaseArtworkMixin)[0]
+            art_provider = provider.get_providers_implementing(provider.CacheReleaseImageProvider)[0]
             image_results = await art_provider.get_release_images_multi(list(release_ids))
             
             # 将图片信息添加到对应的 track 中

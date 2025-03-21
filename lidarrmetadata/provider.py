@@ -711,6 +711,33 @@ class HttpProvider(Provider,
             logger.debug(f'{self._name} request rate limited')
             self._count_request('ratelimit')
 
+class CacheReleaseImageProvider(Provider, ReleaseArtworkMixin):
+    """
+    Only get images from cache
+    """
+    def __init__(self):
+        super(CacheReleaseImageProvider, self).__init__()
+        self._cache = util.RELEASE_IMAGE_CACHE
+
+    async def get_release_images(self, release_id):
+        """
+        Get release images from cache
+        """
+        logger.debug(f"CacheReleaseImageProvider: getting images for release_id={release_id}")
+        result = await self._cache.get(release_id)
+        logger.debug(f"CacheReleaseImageProvider: got images for release_id={release_id}, found: {result[0] is not None}")
+        return result
+    
+    async def get_release_images_multi(self, release_ids):
+        """
+        Get release images from cache
+        """
+        logger.debug(f"CacheReleaseImageProvider: getting images for {len(release_ids)} releases")
+        results = await self._cache.multi_get(release_ids)
+        found_count = sum(1 for res in results if res[0] is not None)
+        logger.debug(f"CacheReleaseImageProvider: found {found_count}/{len(release_ids)} release images in cache")
+        return results
+
 class CoverArtArchiveProvider(HttpProvider, ReleaseArtworkMixin):
     """
     从 Cover Art Archive 获取专辑封面的 Provider

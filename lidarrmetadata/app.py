@@ -463,17 +463,7 @@ async def spotify_lookup_by_text_search(spotifyalbum):
 
     return spotifyalbum
 
-@app.route('/spotify/lookup', methods=['POST'])
-async def spotify_lookup():
-    ids = await request.json
 
-    if ids is None:
-        return jsonify(error='Bad Request - expected JSON list of spotify IDs as post body'), 400
-    
-    results = await util.SPOTIFY_CACHE.multi_get(ids)
-    output = [{'spotifyid': ids[x], 'musicbrainzid': results[x][0]} for x in range(len(ids))]
-
-    return jsonify(output)
     
 @app.route('/invalidate')
 @no_cache
