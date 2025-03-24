@@ -14,8 +14,8 @@ services:
     volumes:
       - redisdata:/data
       - $PWD/redis.conf:/usr/local/etc/redis/redis.conf
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
 
   cache-db:
     image: postgres:13
@@ -26,8 +26,8 @@ services:
       POSTGRES_DB: lm_cache_db
     volumes:
       - cache_pgdata:/var/lib/postgresql/data
-    ports:
-      - "54321:5432"
+    expose:
+      - "5432"
       
   metadata-api:
     build:
@@ -40,11 +40,6 @@ services:
     ports:
       - "5001:5001"  # 假设API服务运行在5000端口，请根据实际情况调整
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - DB_HOST=cache-db
-      - DB_PORT=5432
       - DB_USER=abc
       - DB_PASSWORD=abc
       - DB_NAME=lm_cache_db
-      - POSTGRES_CACHE_HOST=cache-db
