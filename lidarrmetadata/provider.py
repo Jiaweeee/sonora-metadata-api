@@ -1789,11 +1789,10 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
                         continue  # 重试请求
                         
                     # 处理429错误（限流）
-                    if response.status == 429 and attempt < retries:
+                    if response.status == 429:
                         retry_after = int(response.headers.get("Retry-After", "5"))
-                        logger.warning(f"Spotify API限流，等待 {retry_after} 秒后重试")
-                        await asyncio.sleep(retry_after)
-                        continue  # 重试请求
+                        logger.warning(f"Spotify API限流，需要等待 {retry_after} 秒")
+                        raise ProviderUnavailableException(f"Spotify API rate limited, retry after {retry_after} seconds")
                     
                     # 其他错误状态码
                     if not response.ok:
