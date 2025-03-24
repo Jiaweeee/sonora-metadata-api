@@ -69,7 +69,7 @@ class PostgresBackend:
     """
 
     def __init__(self,
-                 endpoint='localhost',
+                 endpoint='cache-db',
                  port=5432,
                  user='abc',
                  password='abc',
