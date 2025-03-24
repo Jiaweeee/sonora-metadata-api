@@ -491,8 +491,8 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
 
     # Spotify app details
     SPOTIFY_REDIRECT_URL = ''
-    SPOTIFY_ID = '79348a07abd949208d0def2be6adb27b'
-    SPOTIFY_SECRET = '44d20758f4b441119636008532822fcc'
+    SPOTIFY_ID = '7d2bc03a3372423fb52729b1bda7097c'
+    SPOTIFY_SECRET = '64a0040db47f4c768e680570c3d9d363'
     SPOTIFY_MATCH_MIN_RATIO = 0.8
 
     # Whether or not running in production

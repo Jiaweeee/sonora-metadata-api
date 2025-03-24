@@ -59,7 +59,7 @@ async def update_wikipedia(count = 50, max_ttl = 60 * 60):
             
 def format_elapsed_time(elapsed, count=None):
     """
-    格式化运行时间,可选显示处理速度
+    Format elapsed time, optionally showing processing speed
     """
     hours = int(elapsed // 3600)
     minutes = int((elapsed % 3600) // 60)
@@ -78,7 +78,7 @@ async def init_artists():
     
     start = timer()
     
-    # 并行执行多个请求
+    # Execute multiple requests in parallel
     page_size = 2000
     concurrent_requests = 10
     all_ids = []
@@ -92,16 +92,16 @@ async def init_artists():
     
     offset = 0
     while True:
-        # 创建多个并发任务
+        # Create multiple concurrent tasks
         tasks = []
         for _ in range(concurrent_requests):
             tasks.append(fetch_page(offset))
             offset += page_size
             
-        # 并行执行所有任务
+        # Execute all tasks in parallel
         results = await asyncio.gather(*tasks)
         
-        # 处理结果
+        # Process results
         new_ids = [id for page_ids in results if page_ids for id in page_ids]
         if not new_ids:
             break
@@ -119,36 +119,36 @@ async def init_artists():
 
 async def init_spotify():
     """
-    初始化Spotify ID映射缓存，使用并发分页加载所有映射数据
+    Initialize Spotify ID mapping cache using concurrent paged loading for all mapping data
     
-    从数据库分批获取MusicBrainz ID与Spotify ID的映射关系，
-    使用10个并发任务，每次请求1000条，直到获取所有数据，
-    并将其存入缓存
+    Retrieves MusicBrainz ID to Spotify ID mappings from the database in batches,
+    using 10 concurrent tasks, requesting 1000 records at a time, until all data is retrieved,
+    and stores it in the cache
     """
     link_provider = provider.get_providers_implementing(provider.ArtistByIdMixin)[0]
     
-    # 基本参数设置
+    # Basic parameter settings
     page_size = 1000
-    concurrency = 10  # 并发任务数
-    offset = 0  # 从第0页开始
-    all_pairs = []  # 存储所有结果
+    concurrency = 10  # Number of concurrent tasks
+    offset = 0  # Start from page 0
+    all_pairs = []  # Store all results
     
-    # 创建一个全局字典来合并所有页面的结果
+    # Create a global dictionary to merge results from all pages
     global_id_map = {}
     
     async def fetch_page(page_offset):
         """
-        获取单页Spotify映射数据，失败时进行重试
+        Fetch a single page of Spotify mapping data, with retry on failure
         
         Args:
-            page_offset: 分页偏移量
+            page_offset: Page offset
             
         Returns:
-            包含(spotifyid, mbid)元组的列表
+            A dictionary containing (spotifyid, mbid) mappings
         """
         max_retries = 3
         retry_count = 0
-        backoff_time = 1.0  # 初始重试等待时间（秒）
+        backoff_time = 1.0  # Initial retry wait time (seconds)
         
         while retry_count <= max_retries:
             try:
@@ -158,226 +158,420 @@ async def init_spotify():
                     if item['mbid'] not in page_id_map:
                         page_id_map[item['mbid']] = []
                     page_id_map[item['mbid']].append(item['spotifyid'])
-                logger.debug(f"成功获取Spotify映射，偏移量={page_offset}，数量={len(maps)}")
-                return page_id_map  # 返回字典而不是元组列表
+                logger.debug(f"Successfully retrieved Spotify mappings, offset={page_offset}, count={len(maps)}")
+                return page_id_map  # Return a dictionary instead of tuple list
             
             except Exception as e:
                 retry_count += 1
                 if retry_count <= max_retries:
-                    # 计算指数退避时间
+                    # Calculate exponential backoff time
                     wait_time = backoff_time * (2 ** (retry_count - 1))
-                    logger.warning(f"获取Spotify映射失败，偏移量={page_offset}，正在进行第{retry_count}次重试，等待{wait_time}秒: {str(e)}")
+                    logger.warning(f"Failed to get Spotify mappings, offset={page_offset}, retry {retry_count}, waiting {wait_time}s: {str(e)}")
                     await asyncio.sleep(wait_time)
                 else:
-                    logger.error(f"获取Spotify映射失败，偏移量={page_offset}，已重试{max_retries}次，放弃: {str(e)}")
+                    logger.error(f"Failed to get Spotify mappings, offset={page_offset}, gave up after {max_retries} retries: {str(e)}")
                     return {}
     
     while True:
-        # 创建当前批次的任务
+        # Create tasks for the current batch
         tasks = []
         for i in range(concurrency):
             current_offset = offset + i * page_size
             tasks.append(fetch_page(current_offset))
         
-        # 并发执行当前批次的任务
+        # Execute the current batch of tasks concurrently
         results = await asyncio.gather(*tasks)
         
-        # 处理结果，检查是否还有更多数据
+        # Process results, check if there's more data
         has_more_data = False
         total_records_in_batch = 0
         
         for page_id_map in results:
-            if page_id_map:  # 如果页面有数据
-                # 合并当前页面的映射到全局映射
+            if page_id_map:  # If the page has data
+                # Merge the current page's mappings to the global map
                 for mbid, spotifyids in page_id_map.items():
                     if mbid not in global_id_map:
                         global_id_map[mbid] = []
-                    # 去重添加Spotify IDs
+                    # Add Spotify IDs without duplicates
                     for spotify_id in spotifyids:
                         if spotify_id not in global_id_map[mbid]:
                             global_id_map[mbid].append(spotify_id)
                             
                 total_records_in_batch += len(page_id_map)
                 if len(page_id_map) == page_size:
-                    has_more_data = True  # 至少有一页是满的，可能还有更多数据
+                    has_more_data = True  # At least one page is full, there might be more data
         
-        # 如果该批次没有获取到任何数据，说明已经完成
+        # If no data was retrieved in this batch, we're done
         if total_records_in_batch == 0:
-            logger.info("没有更多Spotify映射数据")
+            logger.info("No more Spotify mapping data")
             break
             
-        # 如果所有页都不是满的，说明已经到达最后一批
+        # If none of the pages were full, we've reached the last batch
         if not has_more_data:
             break
             
-        # 更新偏移量，准备获取下一批
+        # Update offset for the next batch
         offset += concurrency * page_size
     
-    # 将合并后的全局映射转换为元组列表，用于缓存
+    # Convert the merged global map to a list of tuples for caching
     all_pairs = [(mbid, spotifyids) for mbid, spotifyids in global_id_map.items()]
     
-    logger.info(f"共加载了 {len(all_pairs)} 条Spotify ID映射，包含 {sum(len(spotifyids) for _, spotifyids in all_pairs)} 个Spotify ID")
+    logger.info(f"Loaded {len(all_pairs)} Spotify ID mappings, containing {sum(len(spotifyids) for _, spotifyids in all_pairs)} Spotify IDs")
     
-    # 清除并重新填充缓存
+    # Clear and repopulate the cache
     if all_pairs:
         await util.SPOTIFY_CACHE.clear()
         await util.SPOTIFY_CACHE.multi_set(all_pairs, ttl=None, timeout=None)
     else:
-        logger.warning("未找到任何Spotify映射数据，缓存未更新")
+        logger.warning("No Spotify mapping data found, cache not updated")
 
-# TODO: 需要解决 API 限流问题
-# async def crawl_artist_images():
-#     """
-#     爬取所有艺术家的图片信息并缓存
+async def filter_artists_without_images():
+    """
+    Get all artist IDs from SPOTIFY_CACHE and filter out artists that already have images in ARTIST_IMAGE_CACHE
     
-#     从ARTIST_CACHE获取所有艺术家IDs，通过SPOTIFY_CACHE查找对应的Spotify IDs，
-#     然后使用SpotifyProvider获取艺术家图片，并将结果存入ARTIST_IMAGE_CACHE，
-#     过期时间设为100年后。包含完善的错误处理和日志记录。
-#     """
-#     logger.info("开始获取艺术家图片...")
-#     start = timer()
+    Returns:
+        list: List of artist IDs without images
+    """
+    logger.info("Starting to retrieve and filter artist IDs...")
+    start = timer()
     
-#     # 获取所有艺术家IDs，使用分页方法
-#     try:
-#         # 使用新的分页方法获取所有键
-#         all_artists = []
-#         page_size = 10000  # 每页获取的记录数
-#         offset = 0
+    try:
+        # Use paged method to get all artist IDs
+        all_artists = []
+        page_size = 10000  # Records per page
+        offset = 0
         
-#         while True:
-#             # 获取一页艺术家ID
-#             result = await util.SPOTIFY_CACHE.get_all_keys_paged(limit=page_size, offset=offset)
+        while True:
+            # Get one page of artist IDs
+            result = await util.SPOTIFY_CACHE.get_all_keys_paged(limit=page_size, offset=offset)
             
-#             if not result['keys']:
-#                 break
+            if not result['keys']:
+                break
                 
-#             all_artists.extend(result['keys'])
-#             logger.debug(f"已获取 {len(all_artists)}/{result['total']} 个艺术家ID...")
+            all_artists.extend(result['keys'])
+            logger.debug(f"Retrieved {len(all_artists)}/{result['total']} artist IDs...")
             
-#             # 如果没有更多数据，退出循环
-#             if not result['has_more']:
-#                 break
+            # If there's no more data, exit the loop
+            if not result['has_more']:
+                break
                 
-#             # 更新偏移量
-#             offset += page_size
+            # Update offset
+            offset += page_size
             
-#         if not all_artists:
-#             logger.warning("未找到任何艺术家ID，请确保先运行初始化命令")
-#             return
+        if not all_artists:
+            logger.warning("No artist IDs found, please ensure initialization commands have been run")
+            return []
             
-#         logger.info(f"共找到 {len(all_artists)} 个艺术家ID")
-#     except Exception as e:
-#         logger.error(f"获取艺术家IDs时出错: {str(e)}")
-#         return
-    
-#     # 初始化SpotifyProvider
-#     try:
-#         artist_image_provider = provider.get_providers_implementing(provider.SpotifyProvider)[0]
-#         if not artist_image_provider:
-#             logger.error("未找到有效的SpotifyProvider，无法获取图片")
-#             return
-#     except Exception as e:
-#         logger.error(f"初始化SpotifyProvider时出错: {str(e)}")
-#         return
-    
-#     # 设置过期时间为100年后
-#     expiry_time = provider.utcnow() + timedelta(days=365*100)
-    
-#     # 统计计数器
-#     total_processed = 0
-#     total_with_images = 0
-#     total_errors = 0
-#     batch_size = 100  # 每次处理的批次大小
-    
-#     # 分批处理艺术家
-#     for i in range(0, len(all_artists), batch_size):
-#         batch = all_artists[i:i+batch_size]
-#         logger.debug(f"正在处理艺术家批次 {i//batch_size + 1}/{len(all_artists)//batch_size + 1}, "
-#                     f"共 {len(batch)} 个艺术家")
+        logger.info(f"Found {len(all_artists)} artist IDs")
         
-#         for mbid in batch:
-#             total_processed += 1
-#             logger.debug(f"开始处理艺术家 MBID: {mbid} ({total_processed}/{len(all_artists)})")
+        # Filter out artists that already have images in ARTIST_IMAGE_CACHE
+        filtered_artists = []
+        artists_with_images = 0
+        
+        # Check cache in batches to avoid checking too many at once
+        batch_size = 5000
+        for i in range(0, len(all_artists), batch_size):
+            batch = all_artists[i:i+batch_size]
+            logger.debug(f"Checking ARTIST_IMAGE_CACHE for artist batch {i//batch_size + 1}/{len(all_artists)//batch_size + 1}...")
             
-#             try:
-#                 # 从SPOTIFY_CACHE获取spotify_ids
-#                 result = await util.SPOTIFY_CACHE.get(mbid)
+            # Check in parallel if artists in this batch already have images
+            tasks = [util.ARTIST_IMAGE_CACHE.get(artist_id) for artist_id in batch]
+            results = await asyncio.gather(*tasks)
+            
+            # Only keep artist IDs without images
+            for j, result in enumerate(results):
+                if result is None or result[0] is None:  # If result is None or the first element (image data) is None
+                    filtered_artists.append(batch[j])
+                else:
+                    artists_with_images += 1
+        
+        # Update artist list, keeping only those without images
+        logger.info(f"After filtering, {len(filtered_artists)}/{len(all_artists)} artists need processing (skipped {artists_with_images} artists with existing images)")
+        
+        elapsed = timer() - start
+        logger.info(f"Artist ID filtering complete, took: {format_elapsed_time(elapsed)}")
+        
+        return filtered_artists
+    except Exception as e:
+        logger.error(f"Error retrieving and filtering artist IDs: {str(e)}")
+        import traceback
+        logger.debug(f"Error stack: {traceback.format_exc()}")
+        return []
+
+async def get_images_from_spotify(mbid):
+    """
+    Attempt to get artist images from Spotify, including initializing Provider and getting Spotify ID from cache
+    
+    Args:
+        mbid (str): The artist's MusicBrainz ID
+        
+    Returns:
+        tuple: (images, expiry, success, api_request_count)
+            - images: Dictionary of retrieved images, empty dict if failed
+            - expiry: Expiry time, None if failed
+            - success: Whether images were successfully retrieved
+            - api_request_count: Number of API requests sent
+    """
+    images = {}
+    expiry = None
+    api_requests_count = 0
+    
+    try:
+        # Initialize SpotifyProvider
+        spotify_provider = provider.get_providers_implementing(provider.SpotifyProvider)[0]
+        if not spotify_provider:
+            logger.error("No valid SpotifyProvider found, cannot retrieve Spotify images")
+            return {}, None, False, 0
+            
+        # Get spotify_ids from SPOTIFY_CACHE
+        spotify_ids_result = await util.SPOTIFY_CACHE.get(mbid)
+        
+        # Handle possible None return value
+        if spotify_ids_result is None:
+            logger.debug(f"Artist {mbid} not found in Spotify cache")
+            return {}, None, False, 0
+            
+        spotify_ids, _ = spotify_ids_result
+        
+        if not spotify_ids:
+            logger.debug(f"Artist {mbid} has no associated Spotify IDs")
+            return {}, None, False, 0
+        
+        logger.debug(f"Artist {mbid} found {len(spotify_ids)} Spotify IDs: {spotify_ids}")
+        
+        # Try each spotify_id serially until images are found
+        for spotify_id in spotify_ids:
+            try:
+                logger.debug(f"Retrieving images for artist {mbid} from Spotify (spotify_id={spotify_id})")
                 
-#                 # 处理可能的None返回值
-#                 if result is None:
-#                     logger.debug(f"艺术家 {mbid} 在Spotify缓存中未找到对应记录")
-#                     continue
-                    
-#                 spotify_ids, _ = result
+                # Record request start time
+                start_request = timer()
+                logger.debug(f"Spotify API request start time: {start_request}")
                 
-#                 if not spotify_ids:
-#                     logger.debug(f"艺术家 {mbid} 没有关联的Spotify ID")
-#                     continue
+                # Increment API request count
+                api_requests_count += 1
                 
-#                 logger.debug(f"艺术家 {mbid} 找到 {len(spotify_ids)} 个Spotify ID: {spotify_ids}")
-#                 images = {}
-#                 # 尝试每个spotify_id直到找到图片
-#                 for spotify_id in spotify_ids:
-#                     try:
-#                         logger.debug(f"正在从Spotify获取艺术家 {mbid} 的图片 (spotify_id={spotify_id})")
-                        
-#                         # 记录请求开始时间
-#                         start_request = timer()
-#                         logger.debug(f"开始Spotify API请求时间: {start_request}")
-                        
-#                         # 直接使用异步API请求
-#                         images, expiry = await artist_image_provider.get_artist_images(spotify_id)
-                        
-#                         logger.debug(f"Spotify API请求完成，耗时: {timer() - start_request:.2f}秒")
-                        
-#                         if images:
-#                             logger.debug(f"成功获取艺术家 {mbid} 的图片: 找到 {len(images)} 个图片URL")
-#                             # 找到图片后存入缓存并跳出循环
-#                             await util.ARTIST_IMAGE_CACHE.set(mbid, images, ttl=(expiry_time - provider.utcnow()).total_seconds())
-#                             total_with_images += 1
+                # Use async API request directly
+                images, expiry = await spotify_provider.get_artist_images(spotify_id)
+                
+                logger.debug(f"Spotify API request completed, took: {timer() - start_request:.2f}s")
+                
+                if images:
+                    logger.debug(f"Successfully retrieved images for artist {mbid} from Spotify: found {len(images)} image URLs")
+                    return images, expiry, True, api_requests_count
+                else:
+                    logger.debug(f"Artist {mbid}'s Spotify ID {spotify_id} did not return any images")
+            except ProviderUnavailableException as pu:
+                # Handle ProviderUnavailableException
+                if "429" in str(pu):
+                    # Handle rate limiting error
+                    logger.warning(f"Spotify API rate limit error (MBID={mbid}, spotify_id={spotify_id}): {str(pu)}")
+                    logger.info(f"Waiting 5 seconds before continuing...")
+                    await asyncio.sleep(5)  # Simple backoff wait
+                elif "401" in str(pu):
+                    # Handle authentication error
+                    logger.warning(f"Spotify API authentication error (MBID={mbid}, spotify_id={spotify_id}): {str(pu)}")
+                    logger.info(f"Possibly invalid Spotify ID, skipping...")
+                    # Skip this ID directly
+                    break
+                else:
+                    # Handle other API errors
+                    logger.warning(f"Spotify API error (MBID={mbid}, spotify_id={spotify_id}): {str(pu)}")
+                    # Try the next ID
+                    continue
+            except Exception as e:
+                # Handle other types of errors
+                logger.warning(f"Failed to get Spotify artist images (MBID={mbid}, spotify_id={spotify_id}): {str(e)}, error type: {type(e)}")
+                import traceback
+                logger.debug(f"Error stack: {traceback.format_exc()}")
+                continue
+    except Exception as e:
+        logger.error(f"Error getting Spotify ID or images (MBID={mbid}): {str(e)}")
+        import traceback
+        logger.debug(f"Error stack: {traceback.format_exc()}")
+    
+    # If we reach here, all spotify_ids have been tried but no images were found
+    return {}, None, False, api_requests_count
+
+async def get_images_from_fanart(mbid):
+    """
+    Attempt to get artist images from FanartTV, including initializing Provider
+    
+    Args:
+        mbid (str): The artist's MusicBrainz ID
+        
+    Returns:
+        tuple: (images, expiry, success, api_request_count)
+            - images: Dictionary of retrieved images, empty dict if failed
+            - expiry: Expiry time, None if failed
+            - success: Whether images were successfully retrieved
+            - api_request_count: Number of API requests sent
+    """
+    try:
+        # Initialize FanartTvProvider
+        fanart_provider = provider.get_providers_implementing(provider.FanArtTvProvider)[0]
+        if not fanart_provider:
+            logger.warning("No valid FanartTvProvider found, cannot retrieve FanartTV images")
+            return {}, None, False, 0
+            
+        logger.debug(f"Retrieving images for artist {mbid} from FanartTV")
+        
+        # Record request start time
+        start_request = timer()
+        logger.debug(f"FanartTV API request start time: {start_request}")
+        
+        # Use the artist's MusicBrainz ID directly to request from FanartTV
+        images, expiry = await fanart_provider.get_artist_images(mbid)
+        
+        # Count just one API request
+        api_requests_count = 1
+        
+        logger.debug(f"FanartTV API request completed, took: {timer() - start_request:.2f}s")
+        
+        if images:
+            logger.debug(f"Successfully retrieved images for artist {mbid} from FanartTV: found {len(images)} image URLs")
+            return images, expiry, True, api_requests_count
+        else:
+            logger.debug(f"No images found for artist {mbid} on FanartTV")
+            return {}, None, False, api_requests_count
+    except ProviderUnavailableException as pu:
+        # Handle API errors
+        logger.warning(f"FanartTV API error (MBID={mbid}): {str(pu)}")
+        # Simple backoff wait
+        if "429" in str(pu):
+            logger.info(f"Waiting 5 seconds before continuing...")
+            await asyncio.sleep(5)
+        return {}, None, False, 1
+    except Exception as e:
+        # Handle other types of errors
+        logger.warning(f"Failed to get FanartTV artist images (MBID={mbid}): {str(e)}, error type: {type(e)}")
+        import traceback
+        logger.debug(f"Error stack: {traceback.format_exc()}")
+        return {}, None, False, 1
+
+async def retrieve_artist_images(artist_ids):
+    """
+    Retrieve and cache images for the specified list of artist IDs
+    
+    First tries to get artist images from Spotify, and if that fails,
+    tries to use FanartTV. Processes each artist serially,
+    with a 3-second interval between requests to avoid API rate limiting.
+    Pauses for 5 minutes after every 1000 API requests to prevent stricter rate limiting during long runs.
+    
+    Args:
+        artist_ids (list): List of artist IDs to process
+    """
+    if not artist_ids:
+        logger.info("No artists to process, skipping image retrieval")
+        return
+        
+    logger.info(f"Starting to retrieve images for {len(artist_ids)} artists...")
+    start = timer()
+    
+    # Set expiry time to 100 years from now
+    expiry_time = provider.utcnow() + timedelta(days=365*100)
+    
+    # Statistics counters
+    total_processed = 0
+    total_with_images = 0
+    total_errors = 0
+    total_spotify_images = 0
+    total_fanart_images = 0
+    api_requests_count = 0  # API request counter
+    
+    # Process artists serially, waiting 3 seconds between each request
+    for i, mbid in enumerate(artist_ids):
+        # Check if we need to pause
+        if api_requests_count >= 1000:
+            pause_minutes = 5
+            logger.info(f"Sent {api_requests_count} API requests, pausing for {pause_minutes} minutes before continuing...")
+            await asyncio.sleep(pause_minutes * 60)  # Convert to seconds
+            api_requests_count = 0  # Reset counter
+            logger.info("Resuming processing...")
+            
+        # Check cache again, in case another process has added images since filtering
+        image, _ = await util.ARTIST_IMAGE_CACHE.get(mbid)
+        if image:
+            logger.debug(f"Artist {mbid} already has images, skipping")
+            continue
+        
+            total_processed += 1
+        logger.debug(f"Starting to process artist MBID: {mbid} ({total_processed}/{len(artist_ids)})")
+        
+        # If not the first request, wait 3 seconds
+        if i > 0:
+            await asyncio.sleep(3)
+        
+        try:
+            images = {}
+            expiry = None
+            image_source = None
+            
+            # 1. First, try to get images from Spotify
+            spotify_images, spotify_expiry, spotify_success, spotify_requests = await get_images_from_spotify(mbid)
+            api_requests_count += spotify_requests
+            
+            if spotify_success:
+                images = spotify_images
+                expiry = spotify_expiry
+                image_source = "Spotify"
+                total_spotify_images += 1
+            
+            # 2. If Spotify doesn't have images, try FanartTV
+            if not images:
+                fanart_images, fanart_expiry, fanart_success, fanart_requests = await get_images_from_fanart(mbid)
+                api_requests_count += fanart_requests
+                
+                if fanart_success:
+                    images = fanart_images
+                    expiry = fanart_expiry
+                    image_source = "FanartTV"
+                    total_fanart_images += 1
+            
+            # 3. Save the found images
+            if images:
+                # Store found images in cache
+                await util.ARTIST_IMAGE_CACHE.set(mbid, images, ttl=(expiry_time - provider.utcnow()).total_seconds())
+                total_with_images += 1
                             
-#                             if total_processed % 100 == 0 or total_processed == len(all_artists):
-#                                 logger.info(f"进度: {total_processed}/{len(all_artists)} 艺术家 ({total_with_images} 有图片, {total_errors} 错误), "
-#                                           f"已处理 {format_elapsed_time(timer() - start, total_processed)}")
-#                             break
-#                         else:
-#                             logger.debug(f"艺术家 {mbid} 的Spotify ID {spotify_id} 未返回任何图片")
-#                     except ProviderUnavailableException as pu:
-#                         # 处理ProviderUnavailableException
-#                         if "429" in str(pu):
-#                             # 处理限流错误
-#                             logger.warning(f"Spotify API限流错误 (MBID={mbid}, spotify_id={spotify_id}): {str(pu)}")
-#                             logger.info(f"等待5秒后继续...")
-#                             await asyncio.sleep(5)  # 简单的退避等待
-#                         elif "401" in str(pu):
-#                             # 处理认证错误
-#                             logger.warning(f"Spotify API认证错误 (MBID={mbid}, spotify_id={spotify_id}): {str(pu)}")
-#                             logger.info(f"可能是无效的Spotify ID，跳过...")
-#                             # 直接跳过这个ID
-#                             break
-#                         else:
-#                             # 处理其他API错误
-#                             logger.warning(f"Spotify API错误 (MBID={mbid}, spotify_id={spotify_id}): {str(pu)}")
-#                             # 尝试下一个ID
-#                             continue
-#                     except Exception as e:
-#                         # 处理其它类型的错误
-#                         logger.warning(f"获取Spotify艺术家图片失败 (MBID={mbid}, spotify_id={spotify_id}): {str(e)}, 错误类型: {type(e)}")
-#                         import traceback
-#                         logger.debug(f"错误堆栈: {traceback.format_exc()}")
-#                         continue
-            
-#             except Exception as e:
-#                 logger.error(f"处理MusicBrainz艺术家ID {mbid}时出错: {str(e)}")
-#                 total_errors += 1
-#                 logger.debug(f"当前错误总数: {total_errors}")
+                logger.debug(f"Successfully retrieved images for artist {mbid} (source: {image_source}): found {len(images)} image URLs")
                 
-#         # 每批次后短暂休息，避免过于频繁的API调用
-#         await asyncio.sleep(1)
+                if total_processed % 10 == 0 or total_processed == len(artist_ids):
+                    logger.info(f"Progress: {total_processed}/{len(artist_ids)} artists ({total_with_images} with images [Spotify: {total_spotify_images}, FanartTV: {total_fanart_images}], {total_errors} errors), "
+                              f"processed {format_elapsed_time(timer() - start, total_processed)}, API request count: {api_requests_count}")
+                else:
+                    logger.debug(f"Could not find images for artist {mbid} (no results from Spotify or FanartTV)")
+            
+        except Exception as e:
+            logger.error(f"Error processing MusicBrainz artist ID {mbid}: {str(e)}")
+            total_errors += 1
+            logger.debug(f"Current error count: {total_errors}")
     
-#     elapsed = timer() - start
-#     logger.info(f"艺术家图片获取完成。总计: {total_processed} 艺术家, {total_with_images} 有图片, "
-#                f"{total_errors} 出错. 总耗时: {format_elapsed_time(elapsed)}")
+    elapsed = timer() - start
+    logger.info(f"Artist image retrieval complete. Total: {total_processed} artists, {total_with_images} with images "
+               f"[Spotify: {total_spotify_images}, FanartTV: {total_fanart_images}], "
+               f"{total_errors} errors. Total time: {format_elapsed_time(elapsed)}")
+
+async def crawl_artist_images():
+    """
+    Crawl and cache images for all artists
+    
+    Gets all artist IDs from ARTIST_CACHE, looks up corresponding Spotify IDs via SPOTIFY_CACHE,
+    then uses SpotifyProvider to get artist images, and stores results in ARTIST_IMAGE_CACHE,
+    with expiry time set to 100 years from now. Includes comprehensive error handling and logging.
+    
+    All requests are executed serially with a 3-second interval between requests to avoid API rate limiting.
+    """
+    logger.info("Starting artist image retrieval...")
+    
+    # 1. Filter artist IDs that need processing
+    artist_ids = await filter_artists_without_images()
+    
+    # 2. If there are artists to process, retrieve and cache their images
+    if artist_ids:
+        await retrieve_artist_images(artist_ids)
+    else:
+        logger.info("No artists to process, task complete")
 
 async def update_items(multi_function, cache, name, count = 100, max_ttl = 60 * 60):
     while True:
@@ -446,154 +640,154 @@ async def init_releases():
 
 async def crawl_release_images():
     """
-    为所有缓存的发行版(releases)获取图片信息并存入RELEASE_IMAGE_CACHE
+    Retrieve and cache images for all cached releases in RELEASE_IMAGE_CACHE
     
-    从RELEASE_CACHE获取所有发行版IDs，并行使用ReleaseArtworkMixin中的get_release_images
-    获取每个发行版的图片，并将结果存入RELEASE_IMAGE_CACHE，过期时间设为100年后。
-    采用高并发处理，同时加入限流机制避免请求过多导致服务异常。
+    Gets all release IDs from RELEASE_CACHE, uses get_release_images from ReleaseArtworkMixin in parallel
+    to get images for each release, and stores results in RELEASE_IMAGE_CACHE with expiry time set to 100 years from now.
+    Uses high concurrency processing while also implementing rate limiting to avoid service disruption.
     """
-    logger.info("开始获取发行版图片...")
+    logger.info("Starting release image retrieval...")
     start = timer()
     
-    # 获取所有发行版IDs，使用分页方法
+    # Get all release IDs using paged method
     try:
         all_releases = []
-        page_size = 100000  # 每页获取的记录数
+        page_size = 100000  # Records per page
         offset = 0
         
         while True:
-            # 获取一页发行版ID
+            # Get one page of release IDs
             result = await util.RELEASE_CACHE.get_all_keys_paged(limit=page_size, offset=offset)
             
             if not result['keys']:
                 break
                 
             all_releases.extend(result['keys'])
-            logger.debug(f"已获取 {len(all_releases)}/{result['total']} 个发行版ID...")
+            logger.debug(f"Retrieved {len(all_releases)}/{result['total']} release IDs...")
             
-            # 如果没有更多数据，退出循环
+            # If there's no more data, exit the loop
             if not result['has_more']:
                 break
                 
-            # 更新偏移量
+            # Update offset
             offset += page_size
             
         if not all_releases:
-            logger.warning("未找到任何发行版ID，请确保先运行初始化命令 (--init-releases)")
+            logger.warning("No release IDs found, please ensure initialization command (--init-releases) has been run")
             return
             
-        logger.info(f"共找到 {len(all_releases)} 个发行版ID")
+        logger.info(f"Found {len(all_releases)} release IDs")
     except Exception as e:
-        logger.error(f"获取发行版IDs时出错: {str(e)}")
+        logger.error(f"Error retrieving release IDs: {str(e)}")
         return
     
-    # 初始化图片提供器
+    # Initialize image provider
     try:
         release_image_provider = provider.get_providers_implementing(provider.CoverArtArchiveProvider)[0]
         if not release_image_provider:
-            logger.error("未找到有效的ReleaseArtworkMixin，无法获取图片")
+            logger.error("No valid ReleaseArtworkMixin found, cannot retrieve images")
             return
     except Exception as e:
-        logger.error(f"初始化ReleaseArtworkMixin时出错: {str(e)}")
+        logger.error(f"Error initializing ReleaseArtworkMixin: {str(e)}")
         return
     
-    # 设置过期时间为100年后
+    # Set expiry time to 100 years from now
     expiry_time = provider.utcnow() + timedelta(days=365*100)
     
-    # 计数器和状态变量
+    # Counters and state variables
     total_processed = 0
     total_with_images = 0
     total_errors = 0
     
-    # 每次启动的并发任务数
-    concurrent_tasks = 50  # 同时处理的发行版数量
+    # Number of concurrent tasks to launch
+    concurrent_tasks = 50  # Number of releases to process simultaneously
     
-    # 限制同时进行的批次数
+    # Limit concurrent batches
     semaphore = asyncio.Semaphore(concurrent_tasks)
     
-    # 异步获取单个发行版图片的函数
+    # Async function to get images for a single release
     async def process_release(release_id, progress_index, total_count):
         nonlocal total_with_images, total_errors
         
-        async with semaphore:  # 使用信号量限制并发
+        async with semaphore:  # Use semaphore to limit concurrency
             try:
-                logger.debug(f"处理发行版 {release_id} ({progress_index}/{total_count})")
+                logger.debug(f"Processing release {release_id} ({progress_index}/{total_count})")
                 
-                # 直接使用get_release_images而不是get_release_images_multi
+                # Use get_release_images directly rather than get_release_images_multi
                 images, _ = await release_image_provider.get_release_images(release_id)
                 
                 if images:
-                    # 保存到缓存，设置100年过期时间
+                    # Save to cache with 100-year expiry time
                     await util.RELEASE_IMAGE_CACHE.set(release_id, images, ttl=(expiry_time - provider.utcnow()).total_seconds())
                     total_with_images += 1
                     return True
                 else:
-                    logger.debug(f"发行版 {release_id} 没有图片")
+                    logger.debug(f"Release {release_id} has no images")
                     return False
                     
             except ProviderUnavailableException as pu:
-                # 处理API限流或服务不可用情况
+                # Handle API rate limiting or service unavailability
                 if "429" in str(pu):
-                    logger.warning(f"API限流 (release_id={release_id}): {str(pu)}")
-                    logger.info(f"等待5秒后继续...")
-                    await asyncio.sleep(5)  # 简单的退避等待
+                    logger.warning(f"API rate limit (release_id={release_id}): {str(pu)}")
+                    logger.info(f"Waiting 5 seconds before continuing...")
+                    await asyncio.sleep(5)  # Simple backoff wait
                 else:
-                    logger.warning(f"提供器不可用 (release_id={release_id}): {str(pu)}")
+                    logger.warning(f"Provider unavailable (release_id={release_id}): {str(pu)}")
                 total_errors += 1
                 return False
                 
             except Exception as e:
-                logger.error(f"处理发行版 {release_id} 图片时出错: {str(e)}")
+                logger.error(f"Error processing release {release_id} images: {str(e)}")
                 total_errors += 1
                 return False
     
-    # 分批处理所有发行版，每批同时启动concurrent_tasks个任务
-    batch_size = 500  # 每批处理的ID数
+    # Process all releases in batches, launching concurrent_tasks tasks per batch
+    batch_size = 500  # Number of IDs to process per batch
     
     for batch_start in range(0, len(all_releases), batch_size):
         batch_end = min(batch_start + batch_size, len(all_releases))
         batch = all_releases[batch_start:batch_end]
         
-        logger.info(f"开始处理批次 {batch_start//batch_size + 1}/{(len(all_releases) + batch_size - 1)//batch_size}, "
-                   f"进度: {batch_start}/{len(all_releases)} ({batch_start*100/len(all_releases):.1f}%)")
+        logger.info(f"Starting batch {batch_start//batch_size + 1}/{(len(all_releases) + batch_size - 1)//batch_size}, "
+                   f"progress: {batch_start}/{len(all_releases)} ({batch_start*100/len(all_releases):.1f}%)")
         
-        # 创建这个批次的任务
+        # Create tasks for this batch
         tasks = []
         for i, release_id in enumerate(batch):
             progress_index = batch_start + i + 1
             task = asyncio.create_task(process_release(release_id, progress_index, len(all_releases)))
             tasks.append(task)
         
-        # 等待当前批次的所有任务完成
+        # Wait for all tasks in the current batch to complete
         start_batch = timer()
         batch_results = await asyncio.gather(*tasks)
         batch_time = timer() - start_batch
         
-        # 更新计数器
+        # Update counters
         total_processed += len(batch)
         batch_success = sum(1 for result in batch_results if result)
         
-        # 输出批次处理统计
-        logger.info(f"批次完成: 成功 {batch_success}/{len(batch)}, "
-                   f"总进度: {total_processed}/{len(all_releases)} ({total_processed*100/len(all_releases):.1f}%), "
-                   f"批次耗时: {format_elapsed_time(batch_time)}, 处理速度: {len(batch)/batch_time:.1f} 个/秒")
+        # Output batch processing statistics
+        logger.info(f"Batch complete: success {batch_success}/{len(batch)}, "
+                   f"overall progress: {total_processed}/{len(all_releases)} ({total_processed*100/len(all_releases):.1f}%), "
+                   f"batch time: {format_elapsed_time(batch_time)}, processing speed: {len(batch)/batch_time:.1f} items/s")
         
-        # 输出总体统计
+        # Output overall statistics
         elapsed_so_far = timer() - start
-        logger.info(f"总计统计: 已处理 {total_processed}/{len(all_releases)}, "
-                   f"成功获取图片: {total_with_images}, 错误: {total_errors}, "
-                   f"总耗时: {format_elapsed_time(elapsed_so_far)}, "
-                   f"平均速度: {total_processed/elapsed_so_far:.1f} 个/秒, "
-                   f"预计剩余时间: {format_elapsed_time((len(all_releases) - total_processed) / (total_processed/elapsed_so_far) if total_processed > 0 else 0)}")
+        logger.info(f"Overall statistics: processed {total_processed}/{len(all_releases)}, "
+                   f"successfully retrieved images: {total_with_images}, errors: {total_errors}, "
+                   f"total time: {format_elapsed_time(elapsed_so_far)}, "
+                   f"average speed: {total_processed/elapsed_so_far:.1f} items/s, "
+                   f"estimated time remaining: {format_elapsed_time((len(all_releases) - total_processed) / (total_processed/elapsed_so_far) if total_processed > 0 else 0)}")
         
-        # 批次间短暂休息，避免服务器过载
+        # Brief rest between batches to avoid server overload
         await asyncio.sleep(1)
     
-    # 计算总体统计
+    # Calculate overall statistics
     elapsed = timer() - start
-    logger.info(f"发行版图片获取完成。总计: {total_processed} 发行版, {total_with_images} 有图片, "
-               f"{total_errors} 出错. 总耗时: {format_elapsed_time(elapsed)}, "
-               f"平均处理速度: {total_processed/elapsed:.1f} 个/秒")
+    logger.info(f"Release image retrieval complete. Total: {total_processed} releases, {total_with_images} with images, "
+               f"{total_errors} errors. Total time: {format_elapsed_time(elapsed)}, "
+               f"average processing speed: {total_processed/elapsed:.1f} items/s")
 
 async def crawl():
     await asyncio.gather(
@@ -615,6 +809,7 @@ def main():
     parser.add_argument("--init-spotify", action="store_true")
     parser.add_argument("--init-releases", action="store_true")
     parser.add_argument("--crawl-release-images", action="store_true")
+    parser.add_argument("--crawl-artist-images", action="store_true")
     args = parser.parse_args()
     
     if args.init_artists:
@@ -631,6 +826,10 @@ def main():
         
     if args.crawl_release_images:
         asyncio.run(crawl_release_images())
+        sys.exit()
+        
+    if args.crawl_artist_images:
+        asyncio.run(crawl_artist_images())
         sys.exit()
     
     asyncio.run(crawl())
