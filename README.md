@@ -1,27 +1,29 @@
-## 开发环境配置
+## 部署说明
 
-项目依赖可以通过以下两种方式管理：
+1. 确保已安装 Docker 和 Docker Compose
 
-1. 使用 [poetry](https://python-poetry.org) 管理依赖：
+2. 克隆项目并进入项目目录：
 ```shell
-poetry install --with=dev
-poetry shell # 或者使用 poetry run ...
+git clone <repository-url>
+cd sonora-metadata-api
 ```
 
-2. 使用 conda 和 pip 管理依赖（推荐）：
-```shell
-conda create -n lidarr-metadata python=3.9
-conda activate lidarr-metadata
-pip install -r requirements.txt
-```
-
-## 运行服务
-在启动服务之前，需要先运行必要的依赖服务：
+3. 启动所有服务：
 ```shell
 docker-compose up -d
 ```
 
-然后执行以下命令启动服务：
+这将启动以下服务：
+- Redis 服务（端口：6379）
+- PostgreSQL 数据库（端口：5432）
+- Metadata API 服务（端口：5001）
+
+4. 检查服务状态：
 ```shell
-python lidarrmetadata/server.py
+docker-compose ps
+```
+
+5. 查看服务日志：
+```shell
+docker-compose logs -f metadata-api
 ```
