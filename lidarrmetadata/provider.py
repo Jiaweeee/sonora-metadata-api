@@ -738,6 +738,24 @@ class CacheReleaseImageProvider(Provider, ReleaseArtworkMixin):
         logger.debug(f"CacheReleaseImageProvider: found {found_count}/{len(release_ids)} release images in cache")
         return results
 
+# TODO: Use this for artist image retrieval when crawling is complete
+class CacheArtistImageProvider(Provider, ArtistArtworkMixin):
+    """
+    Only get images from cache
+    """
+    def __init__(self):
+        super(CacheArtistImageProvider, self).__init__()
+        self._cache = util.ARTIST_IMAGE_CACHE
+
+    async def get_artist_images(self, artist_id):
+        """
+        Get artist images from cache
+        """
+        logger.debug(f"CacheArtistImageProvider: getting images for artist_id={artist_id}")
+        result = await self._cache.get(artist_id)
+        logger.debug(f"CacheArtistImageProvider: got images for artist_id={artist_id}, result: {result}")
+        return result
+
 class CoverArtArchiveProvider(HttpProvider, ReleaseArtworkMixin):
     """
     从 Cover Art Archive 获取专辑封面的 Provider

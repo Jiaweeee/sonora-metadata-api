@@ -302,7 +302,8 @@ def format_search_result(item, entity_type):
     Returns:
         Formatted search result
     """
-    image = item.get('images', {}).get('small', None)
+    images = item.get('images')
+    image = images.get('small', None) if images and isinstance(images, dict) else None
 
     # 处理艺术家信息
     artist_name = None

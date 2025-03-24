@@ -513,6 +513,7 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
         'SPOTIFYPROVIDER': ([], {'CLIENT_ID': SPOTIFY_ID, 'CLIENT_SECRET': SPOTIFY_SECRET}),
         'COVERARTARCHIVEPROVIDER': ([], {}),
         'CACHERELEASEIMAGEPROVIDER': ([], {}),
+        'CACHEARTISTIMAGEPROVIDER': ([], {}),
     }
 
     # Connection info for sentry. Defaults to None, in which case Sentry won't be used

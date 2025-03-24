@@ -523,7 +523,7 @@ async def get_artist_search_results(query, limit):
         
         # Add images to the original search results - only take the first element of the tuple (images list)
         for artist, image_result in zip(artists, artist_images_results):
-            artist['images'] = image_result[0] if image_result else []
+            artist['images'] = image_result[0] if image_result else None
     
     return [{
         'id': artist['id'],
