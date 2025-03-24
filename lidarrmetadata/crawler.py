@@ -495,7 +495,7 @@ async def retrieve_artist_images(artist_ids):
             logger.debug(f"Artist {mbid} already has images, skipping")
             continue
         
-            total_processed += 1
+        total_processed += 1
         logger.debug(f"Starting to process artist MBID: {mbid} ({total_processed}/{len(artist_ids)})")
         
         # If not the first request, wait 3 seconds
