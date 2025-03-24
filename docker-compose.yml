@@ -47,3 +47,4 @@ services:
       - DB_USER=abc
       - DB_PASSWORD=abc
       - DB_NAME=lm_cache_db
+      - POSTGRES_CACHE_HOST=cache-db
