@@ -26,8 +26,8 @@ services:
       POSTGRES_DB: lm_cache_db
     volumes:
       - cache_pgdata:/var/lib/postgresql/data
-    expose:
-      - "5432"
+    ports:
+      - "54321:5432"
       
   metadata-api:
     build:
