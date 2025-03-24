@@ -310,80 +310,82 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
         'track': MONTHS * 3,
     }
     
-    CACHE_CONFIG = {
-        'default': {
-            'cache': 'aiocache.RedisCache',
-            'endpoint': REDIS_HOST,
-            'port': REDIS_PORT,
-            'namespace': 'lm3.7',
-            'serializer': {
-                'class': 'lidarrmetadata.cache.CompressionSerializer'
+    @property
+    def CACHE_CONFIG(self):
+        return {
+                'default': {
+                    'cache': 'aiocache.RedisCache',
+                    'endpoint': self.REDIS_HOST,
+                    'port': self.REDIS_PORT,
+                    'namespace': 'lm3.7',
+                    'serializer': {
+                    'class': 'lidarrmetadata.cache.CompressionSerializer'
+                },
             },
-        },
-        'fanart': {
-            'cache': 'lidarrmetadata.cache.PostgresCache',
-            'endpoint': POSTGRES_CACHE_HOST,
-            'port': POSTGRES_CACHE_PORT,
-            'db_table': 'fanart',
-            'timeout': 0,
-        },
-        'wikipedia': {
-            'cache': 'lidarrmetadata.cache.PostgresCache',
-            'endpoint': POSTGRES_CACHE_HOST,
-            'port': POSTGRES_CACHE_PORT,
-            'db_table': 'wikipedia',
-            'timeout': 0,
-        },
-        'artist': {
-            'cache': 'lidarrmetadata.cache.PostgresCache',
-            'endpoint': POSTGRES_CACHE_HOST,
-            'port': POSTGRES_CACHE_PORT,
-            'db_table': 'artist',
-            'timeout': 0,
-        },
-        'album': {
-            'cache': 'lidarrmetadata.cache.PostgresCache',
-            'endpoint': POSTGRES_CACHE_HOST,
-            'port': POSTGRES_CACHE_PORT,
-            'db_table': 'album',
-            'timeout': 0,
-        },
-        'spotify': {
-            'cache': 'lidarrmetadata.cache.PostgresCache',
-            'endpoint': POSTGRES_CACHE_HOST,
-            'port': POSTGRES_CACHE_PORT,
-            'db_table': 'spotify',
-            'timeout': 0,
-        },
-        'release_image': {
-            'cache': 'lidarrmetadata.cache.PostgresCache',
-            'endpoint': POSTGRES_CACHE_HOST,
-            'port': POSTGRES_CACHE_PORT,
-            'db_table': 'release_image',
-            'timeout': 0,
-        },
-        'release': {
-            'cache': 'lidarrmetadata.cache.PostgresCache',
-            'endpoint': POSTGRES_CACHE_HOST,
-            'port': POSTGRES_CACHE_PORT,
-            'db_table': 'release',
-            'timeout': 0,
-        },
-        'track': {
-            'cache': 'lidarrmetadata.cache.PostgresCache',
-            'endpoint': POSTGRES_CACHE_HOST,
-            'port': POSTGRES_CACHE_PORT,
-            'db_table': 'track',
-            'timeout': 0,
-        },
-        'artist_image': {
-            'cache': 'lidarrmetadata.cache.PostgresCache',
-            'endpoint': POSTGRES_CACHE_HOST,
-            'port': POSTGRES_CACHE_PORT,
-            'db_table': 'artist_image',
-            'timeout': 0,
+            'fanart': {
+                'cache': 'lidarrmetadata.cache.PostgresCache',
+                'endpoint': self.POSTGRES_CACHE_HOST,
+                'port': self.POSTGRES_CACHE_PORT,
+                'db_table': 'fanart',
+                'timeout': 0,
+            },
+            'wikipedia': {
+                'cache': 'lidarrmetadata.cache.PostgresCache',
+                'endpoint': self.POSTGRES_CACHE_HOST,
+                'port': self.POSTGRES_CACHE_PORT,
+                'db_table': 'wikipedia',
+                'timeout': 0,
+            },
+            'artist': {
+                'cache': 'lidarrmetadata.cache.PostgresCache',
+                'endpoint': self.POSTGRES_CACHE_HOST,
+                'port': self.POSTGRES_CACHE_PORT,
+                'db_table': 'artist',
+                'timeout': 0,
+            },
+            'album': {
+                'cache': 'lidarrmetadata.cache.PostgresCache',
+                'endpoint': self.POSTGRES_CACHE_HOST,
+                'port': self.POSTGRES_CACHE_PORT,
+                'db_table': 'album',
+                'timeout': 0,
+            },
+            'spotify': {
+                'cache': 'lidarrmetadata.cache.PostgresCache',
+                'endpoint': self.POSTGRES_CACHE_HOST,
+                'port': self.POSTGRES_CACHE_PORT,
+                'db_table': 'spotify',
+                'timeout': 0,
+            },
+            'release_image': {
+                'cache': 'lidarrmetadata.cache.PostgresCache',
+                'endpoint': self.POSTGRES_CACHE_HOST,
+                'port': self.POSTGRES_CACHE_PORT,
+                'db_table': 'release_image',
+                'timeout': 0,
+            },
+            'release': {
+                'cache': 'lidarrmetadata.cache.PostgresCache',
+                'endpoint': self.POSTGRES_CACHE_HOST,
+                'port': self.POSTGRES_CACHE_PORT,
+                'db_table': 'release',
+                'timeout': 0,
+            },
+            'track': {
+                'cache': 'lidarrmetadata.cache.PostgresCache',
+                'endpoint': self.POSTGRES_CACHE_HOST,
+                'port': self.POSTGRES_CACHE_PORT,
+                'db_table': 'track',
+                'timeout': 0,
+            },
+            'artist_image': {
+                'cache': 'lidarrmetadata.cache.PostgresCache',
+                'endpoint': self.POSTGRES_CACHE_HOST,
+                'port': self.POSTGRES_CACHE_PORT,
+                'db_table': 'artist_image',
+                'timeout': 0,
+            }
         }
-    }
 
     CRAWLER_BATCH_SIZE = {
         'wikipedia': 50,
