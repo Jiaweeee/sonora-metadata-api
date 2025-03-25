@@ -28,6 +28,11 @@ logger.addHandler(logging.StreamHandler())
 logger.setLevel(logging.INFO)
 logger.info('Have app logger')
 
+# 创建一个 Blueprint
+from quart import Blueprint
+api_bp = Blueprint('api', __name__, url_prefix='/api')
+
+# 创建 Quart 应用
 app = Quart(__name__)
 app.config.from_object(config.get_config())
 
@@ -137,7 +142,7 @@ def validate_mbid(mbid):
     except ValueError:
         return jsonify(error='Invalid UUID'), 400
 
-@app.route('/')
+@api_bp.route('/')
 @no_cache
 async def default_route():
     """
@@ -158,7 +163,7 @@ async def default_route():
     return jsonify(info)
 
 
-@app.route('/artist/<mbid>', methods=['GET'])
+@api_bp.route('/artist/<mbid>', methods=['GET'])
 async def get_artist_info_route(mbid):
     uuid_validation_response = validate_mbid(mbid)
     if uuid_validation_response:
@@ -172,7 +177,7 @@ async def get_artist_info_route(mbid):
 
     return await add_cache_control_header(jsonify(artist), expiry)
 
-@app.route('/artist/<mbid>/refresh', methods=['POST'])
+@api_bp.route('/artist/<mbid>/refresh', methods=['POST'])
 async def refresh_artist_route(mbid):
     uuid_validation_response = validate_mbid(mbid)
     if uuid_validation_response:
@@ -183,7 +188,7 @@ async def refresh_artist_route(mbid):
     await invalidate_cloudflare([f'{base_url}/artist/{mbid}'])
     return jsonify(success=True)
 
-@app.route('/release/<mbid>', methods=['GET'])
+@api_bp.route('/release/<mbid>', methods=['GET'])
 async def get_release_info_route(mbid):
     uuid_validation_response = validate_mbid(mbid)
     if uuid_validation_response:
@@ -191,7 +196,7 @@ async def get_release_info_route(mbid):
     release, _ = await api.get_release_info(mbid)
     return jsonify(release)
 
-@app.route('/track/<mbid>', methods=['GET'])
+@api_bp.route('/track/<mbid>', methods=['GET'])
 async def get_track_info_route(mbid):
     """
     获取曲目详细信息
@@ -203,7 +208,7 @@ async def get_track_info_route(mbid):
     track, _ = await api.get_track_info(mbid)
     return jsonify(track)
 
-@app.route('/search')
+@api_bp.route('/search')
 async def search():
     """Unified search endpoint that can search for artists, releases, tracks or all
     
@@ -353,7 +358,7 @@ def format_track_result(item):
     """Format track search result into standardized structure"""
     return format_search_result(item, 'track')
 
-@app.route('/spotify/artist/<spotify_id>', methods=['GET'])
+@api_bp.route('/spotify/artist/<spotify_id>', methods=['GET'])
 async def spotify_lookup_artist(spotify_id):
     mbid, expires = await util.SPOTIFY_CACHE.get(spotify_id)
 
@@ -381,7 +386,7 @@ async def spotify_lookup_artist(spotify_id):
     if spotifyalbum is None:
         await util.SPOTIFY_CACHE.set(spotify_id, 0, ttl=app.config['CACHE_TTL']['cloudflare'])
         return jsonify(error='Not found'), 404
-    
+
     spotifyalbum = await spotify_lookup_by_text_search(spotifyalbum)
 
     if spotifyalbum is None:
@@ -393,7 +398,7 @@ async def spotify_lookup_artist(spotify_id):
 
     return redirect(app.config['ROOT_PATH'] + url_for('get_artist_info_route', mbid=spotifyalbum['ArtistMusicBrainzId']), 301)
 
-@app.route('/spotify/album/<spotify_id>', methods=['GET'])
+@api_bp.route('/spotify/album/<spotify_id>', methods=['GET'])
 async def spotify_lookup_album(spotify_id):
     mbid, expires = await util.SPOTIFY_CACHE.get(spotify_id)
 
@@ -466,7 +471,7 @@ async def spotify_lookup_by_text_search(spotifyalbum):
 
 
     
-@app.route('/invalidate')
+@api_bp.route('/invalidate')
 @no_cache
 async def invalidate_cache():
 
@@ -561,7 +566,7 @@ async def invalidate_cloudflare(files):
                     retries -= 1
 
 
-@app.route('/discover/new-releases')
+@api_bp.route('/discover/new-releases')
 async def discover_new_releases():
     """Get new releases from Billboard 200 chart.
     
@@ -571,7 +576,7 @@ async def discover_new_releases():
     result = await api.get_new_releases()
     return jsonify(result)
 
-@app.route('/discover/hot-songs')
+@api_bp.route('/discover/hot-songs')
 async def discover_hot_songs():
     """Get hot songs from Apple Music charts
     
@@ -588,7 +593,7 @@ async def discover_hot_songs():
     results = await api.get_hot_songs()
     return jsonify(results)
 
-@app.route('/discover/charts')
+@api_bp.route('/discover/charts')
 async def discover_charts():
     """
     Get all charts.
@@ -603,7 +608,7 @@ async def discover_charts():
     }
     return jsonify(result)
 
-@app.route('/discover/cache/invalidate', methods=['POST'])
+@api_bp.route('/discover/cache/invalidate', methods=['POST'])
 @no_cache
 async def invalidate_discover_cache():
     """Invalidate one or more discover cache entries
@@ -674,7 +679,7 @@ async def invalidate_discover_cache():
     status_code = 200 if len(results) > 0 else 500
     return jsonify(response), status_code
 
-@app.route('/discover/chart/<chart_id>')
+@api_bp.route('/discover/chart/<chart_id>')
 async def get_chart(chart_id):
     """
     Get a specific chart.
@@ -689,7 +694,7 @@ async def get_chart(chart_id):
     chart = await chart_function()
     return jsonify(chart)
 
-@app.route('/discover')
+@api_bp.route('/discover')
 async def get_discover_data():
     """
     Get discover data.
@@ -713,5 +718,8 @@ async def run_async_del():
     for prov in async_providers:
         await prov._del()
         
+# 在文件末尾注册 Blueprint
+app.register_blueprint(api_bp)
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=config.get_config().HTTP_PORT, use_reloader=True)
