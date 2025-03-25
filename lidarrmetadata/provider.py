@@ -1645,7 +1645,8 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
                     'last_request': None,
                     'error_count': 0,
                     'last_error': None,
-                    'is_healthy': True
+                    'is_healthy': True,
+                    'retry_after': 0  # 增加 retry_after 字段，记录需要等待的时间
                 })
             
             # 配置参数
@@ -1681,27 +1682,44 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
             current_stats = self.credential_stats[self.current_index]
             now = datetime.datetime.now()
             
+            # 检查健康状态（包括限流状态）
+            if not current_stats.get('is_healthy', True):
+                # 如果凭证处于限流状态，检查是否还在等待期
+                if 'last_error' in current_stats and 'retry_after' in current_stats and current_stats['retry_after'] > 0:
+                    # 计算自上次错误以来已经过了多长时间
+                    elapsed_time = (now - current_stats['last_error']).total_seconds()
+                    # 如果还没过足够的时间，则需要轮转
+                    if elapsed_time < current_stats['retry_after']:
+                        logger.warning(f"Credential {self.current_index} 仍在限流冷却期，还需等待 {current_stats['retry_after'] - elapsed_time:.1f} 秒")
+                        return True
+                    else:
+                        # 已经过了足够的时间，可以尝试恢复使用
+                        logger.info(f"Credential {self.current_index} 限流冷却期已过，尝试恢复使用")
+                        current_stats['is_healthy'] = True
+                        current_stats['error_count'] = 0
+                        current_stats['retry_after'] = 0
+                        return False
+                else:
+                    # 其他非限流相关的健康问题
+                    logger.warning(f"Credential {self.current_index} 不健康，需要轮转")
+                    return True
+            
             # 检查请求频率
-            if current_stats['last_request']:
+            if current_stats.get('last_request'):
                 time_since_last_request = (now - current_stats['last_request']).total_seconds()
                 if time_since_last_request < 60:  # 1分钟内
-                    if current_stats['request_count'] >= self.max_requests_per_minute:
+                    if current_stats.get('request_count', 0) >= self.max_requests_per_minute:
                         logger.warning(f"Credential {self.current_index} 请求频率过高，需要轮转")
                         return True
             
             # 检查连续请求次数
-            if current_stats['continuous_request_count'] >= self.max_continuous_requests:
+            if current_stats.get('continuous_request_count', 0) >= self.max_continuous_requests:
                 logger.warning(f"Credential {self.current_index} 连续请求次数过多，需要轮转")
                 return True
             
             # 检查错误次数
-            if current_stats['error_count'] >= self.max_errors_before_rotation:
+            if current_stats.get('error_count', 0) >= self.max_errors_before_rotation:
                 logger.warning(f"Credential {self.current_index} 错误次数过多，需要轮转")
-                return True
-            
-            # 检查健康状态
-            if not current_stats['is_healthy']:
-                logger.warning(f"Credential {self.current_index} 不健康，需要轮转")
                 return True
             
             # 检查轮转间隔
@@ -1711,18 +1729,48 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
             
             return False
         
+        def record_error(self):
+            """
+            记录当前 credential 的错误
+            """
+            stats = self.credential_stats[self.current_index]
+            stats['error_count'] += 1
+            stats['last_error'] = datetime.datetime.now()
+            stats['is_healthy'] = False
+            
+        def record_rate_limit_error(self, retry_after):
+            """
+            记录限流错误，并保存 retry-after 时间
+            
+            Args:
+                retry_after (int): 接口返回的需要等待的秒数
+            """
+            stats = self.credential_stats[self.current_index]
+            stats['error_count'] += 1
+            stats['last_error'] = datetime.datetime.now()
+            stats['is_healthy'] = False
+            stats['retry_after'] = retry_after
+            logger.warning(f"Credential {self.current_index} 被限流，需要等待 {retry_after} 秒")
+
         async def _rotate_credential(self):
             """
             轮转到下一个 credential
             """
-            # 重置当前 credential 的统计信息
+            # 不再重置当前 credential 的健康状态，仅重置其他统计信息
+            current_stats = self.credential_stats[self.current_index]
+            is_healthy = current_stats.get('is_healthy', True)
+            retry_after = current_stats.get('retry_after', 0)
+            last_error = current_stats.get('last_error')
+            
+            # 只重置非健康相关的统计
             self.credential_stats[self.current_index] = {
                 'request_count': 0,
                 'continuous_request_count': 0,
                 'last_request': None,
-                'error_count': 0,
-                'last_error': None,
-                'is_healthy': True
+                'error_count': current_stats.get('error_count', 0),  # 保留错误计数
+                'last_error': last_error,  # 保留最后错误时间
+                'is_healthy': is_healthy,  # 保留健康状态
+                'retry_after': retry_after  # 保留限流等待时间
             }
             
             # 轮转到下一个 credential
@@ -1733,6 +1781,34 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
             
             # 启动健康检查
             asyncio.create_task(self._health_check())
+            
+        async def _health_check(self):
+            """
+            定期检查所有 credential 的健康状态
+            """
+            while True:
+                await asyncio.sleep(self.health_check_interval)
+                
+                async with self.rotation_lock:
+                    for i, stats in enumerate(self.credential_stats):
+                        if not stats.get('is_healthy', True):
+                            now = datetime.datetime.now()
+                            last_error = stats.get('last_error')
+                            retry_after = stats.get('retry_after', 0)
+                            
+                            # 如果存在最后错误时间且已经过了足够的恢复时间
+                            if last_error and (now - last_error).total_seconds() > retry_after:
+                                # 恢复健康状态
+                                stats['is_healthy'] = True
+                                stats['error_count'] = 0
+                                stats['retry_after'] = 0
+                                logger.info(f"Credential {i} 已恢复健康状态，等待时间已过")
+                            else:
+                                # 计算还需等待的时间
+                                if last_error and retry_after > 0:
+                                    elapsed = (now - last_error).total_seconds()
+                                    remaining = max(0, retry_after - elapsed)
+                                    logger.debug(f"Credential {i} 仍处于恢复期，还需等待 {remaining:.1f} 秒")
         
         def _update_stats(self):
             """
@@ -1751,30 +1827,6 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
             stats['last_request'] = now
             logger.info(f"Credential {self.current_index} 当前请求计数: {stats['request_count']}, 连续请求计数: {stats['continuous_request_count']}")
         
-        async def _health_check(self):
-            """
-            定期检查所有 credential 的健康状态
-            """
-            while True:
-                await asyncio.sleep(self.health_check_interval)
-                
-                async with self.rotation_lock:
-                    for i, stats in enumerate(self.credential_stats):
-                        if not stats['is_healthy']:
-                            # 如果 credential 不健康，尝试恢复
-                            stats['is_healthy'] = True
-                            stats['error_count'] = 0
-                            logger.info(f"Credential {i} 已恢复健康状态")
-        
-        def record_error(self):
-            """
-            记录当前 credential 的错误
-            """
-            stats = self.credential_stats[self.current_index]
-            stats['error_count'] += 1
-            stats['last_error'] = datetime.datetime.now()
-            stats['is_healthy'] = False
-
     def __init__(self, credentials):
         """
         初始化Spotify提供程序
@@ -1884,8 +1936,8 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
                         
                     # 处理429错误（限流）
                     if response.status == 429:
-                        self._credential_manager.record_error()  # 记录限流错误
                         retry_after = int(response.headers.get("Retry-After", "5"))
+                        self._credential_manager.record_rate_limit_error(retry_after)  # 记录限流错误和等待时间
                         logger.warning(f"Spotify API限流，需要等待 {retry_after} 秒")
                         raise ProviderUnavailableException(f"Spotify API rate limited, retry after {retry_after} seconds")
                     
