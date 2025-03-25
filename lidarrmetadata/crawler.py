@@ -483,7 +483,7 @@ async def retrieve_artist_images(artist_ids):
     for i, mbid in enumerate(artist_ids):
         # Check if we need to pause
         if api_requests_count >= 1000:
-            pause_minutes = 5
+            pause_minutes = 1
             logger.info(f"Sent {api_requests_count} API requests, pausing for {pause_minutes} minutes before continuing...")
             await asyncio.sleep(pause_minutes * 60)  # Convert to seconds
             api_requests_count = 0  # Reset counter
@@ -498,9 +498,9 @@ async def retrieve_artist_images(artist_ids):
         total_processed += 1
         logger.debug(f"Starting to process artist MBID: {mbid} ({total_processed}/{len(artist_ids)})")
         
-        # If not the first request, wait 3 seconds
+        # If not the first request, wait 2 seconds
         if i > 0:
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
         
         try:
             images = {}
@@ -642,44 +642,45 @@ async def crawl_release_images():
     """
     Retrieve and cache images for all cached releases in RELEASE_IMAGE_CACHE
     
-    Gets all release IDs from RELEASE_CACHE, uses get_release_images from ReleaseArtworkMixin in parallel
-    to get images for each release, and stores results in RELEASE_IMAGE_CACHE with expiry time set to 100 years from now.
+    Gets release IDs from RELEASE_CACHE in batches, filters out those that already have images,
+    then processes each batch using get_release_images from ReleaseArtworkMixin in parallel.
+    Stores results in RELEASE_IMAGE_CACHE with expiry time set to 100 years from now.
     Uses high concurrency processing while also implementing rate limiting to avoid service disruption.
     """
+    def get_ttl(is_success):
+        days = 30
+        if is_success:
+            # Set expiry time to 100 years from now if images were found
+            days = 365 * 100
+        expiry_time = provider.utcnow() + timedelta(days=days)
+        return (expiry_time - provider.utcnow()).total_seconds()
+
+    # Async function to get images for a single release
+    async def process_release(release_id, image_provider):
+        try:
+            # Use get_release_images directly rather than get_release_images_multi
+            images, _ = await image_provider.get_release_images(release_id)
+            
+            if images:
+                # Save to cache with 100-year expiry time
+                await util.RELEASE_IMAGE_CACHE.set(release_id, images, ttl=get_ttl(is_success=True))
+                return True
+            else:
+                await util.RELEASE_IMAGE_CACHE.set(release_id, None, ttl=get_ttl(is_success=False))
+                return False
+                
+        except ProviderUnavailableException as pu:
+            # Handle API rate limiting or service unavailability
+            if "429" in str(pu):
+                await asyncio.sleep(5)  # Simple backoff wait
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error processing release {release_id} images: {str(e)}")
+            return False
+
+
     logger.info("Starting release image retrieval...")
-    start = timer()
-    
-    # Get all release IDs using paged method
-    try:
-        all_releases = []
-        page_size = 100000  # Records per page
-        offset = 0
-        
-        while True:
-            # Get one page of release IDs
-            result = await util.RELEASE_CACHE.get_all_keys_paged(limit=page_size, offset=offset)
-            
-            if not result['keys']:
-                break
-                
-            all_releases.extend(result['keys'])
-            logger.debug(f"Retrieved {len(all_releases)}/{result['total']} release IDs...")
-            
-            # If there's no more data, exit the loop
-            if not result['has_more']:
-                break
-                
-            # Update offset
-            offset += page_size
-            
-        if not all_releases:
-            logger.warning("No release IDs found, please ensure initialization command (--init-releases) has been run")
-            return
-            
-        logger.info(f"Found {len(all_releases)} release IDs")
-    except Exception as e:
-        logger.error(f"Error retrieving release IDs: {str(e)}")
-        return
     
     # Initialize image provider
     try:
@@ -690,105 +691,77 @@ async def crawl_release_images():
     except Exception as e:
         logger.error(f"Error initializing ReleaseArtworkMixin: {str(e)}")
         return
-    
-    # Set expiry time to 100 years from now
-    expiry_time = provider.utcnow() + timedelta(days=365*100)
-    
-    # Counters and state variables
-    total_processed = 0
-    total_with_images = 0
-    total_errors = 0
-    
-    # Number of concurrent tasks to launch
-    concurrent_tasks = 50  # Number of releases to process simultaneously
-    
-    # Limit concurrent batches
-    semaphore = asyncio.Semaphore(concurrent_tasks)
-    
-    # Async function to get images for a single release
-    async def process_release(release_id, progress_index, total_count):
-        nonlocal total_with_images, total_errors
-        
-        async with semaphore:  # Use semaphore to limit concurrency
-            try:
-                logger.debug(f"Processing release {release_id} ({progress_index}/{total_count})")
-                
-                # Use get_release_images directly rather than get_release_images_multi
-                images, _ = await release_image_provider.get_release_images(release_id)
-                
-                if images:
-                    # Save to cache with 100-year expiry time
-                    await util.RELEASE_IMAGE_CACHE.set(release_id, images, ttl=(expiry_time - provider.utcnow()).total_seconds())
-                    total_with_images += 1
-                    return True
-                else:
-                    logger.debug(f"Release {release_id} has no images")
-                    return False
-                    
-            except ProviderUnavailableException as pu:
-                # Handle API rate limiting or service unavailability
-                if "429" in str(pu):
-                    logger.warning(f"API rate limit (release_id={release_id}): {str(pu)}")
-                    logger.info(f"Waiting 5 seconds before continuing...")
-                    await asyncio.sleep(5)  # Simple backoff wait
-                else:
-                    logger.warning(f"Provider unavailable (release_id={release_id}): {str(pu)}")
-                total_errors += 1
-                return False
-                
-            except Exception as e:
-                logger.error(f"Error processing release {release_id} images: {str(e)}")
-                total_errors += 1
-                return False
-    
-    # Process all releases in batches, launching concurrent_tasks tasks per batch
-    batch_size = 500  # Number of IDs to process per batch
-    
-    for batch_start in range(0, len(all_releases), batch_size):
-        batch_end = min(batch_start + batch_size, len(all_releases))
-        batch = all_releases[batch_start:batch_end]
-        
-        logger.info(f"Starting batch {batch_start//batch_size + 1}/{(len(all_releases) + batch_size - 1)//batch_size}, "
-                   f"progress: {batch_start}/{len(all_releases)} ({batch_start*100/len(all_releases):.1f}%)")
-        
-        # Create tasks for this batch
-        tasks = []
-        for i, release_id in enumerate(batch):
-            progress_index = batch_start + i + 1
-            task = asyncio.create_task(process_release(release_id, progress_index, len(all_releases)))
-            tasks.append(task)
-        
-        # Wait for all tasks in the current batch to complete
-        start_batch = timer()
-        batch_results = await asyncio.gather(*tasks)
-        batch_time = timer() - start_batch
-        
-        # Update counters
-        total_processed += len(batch)
-        batch_success = sum(1 for result in batch_results if result)
-        
-        # Output batch processing statistics
-        logger.info(f"Batch complete: success {batch_success}/{len(batch)}, "
-                   f"overall progress: {total_processed}/{len(all_releases)} ({total_processed*100/len(all_releases):.1f}%), "
-                   f"batch time: {format_elapsed_time(batch_time)}, processing speed: {len(batch)/batch_time:.1f} items/s")
-        
-        # Output overall statistics
-        elapsed_so_far = timer() - start
-        logger.info(f"Overall statistics: processed {total_processed}/{len(all_releases)}, "
-                   f"successfully retrieved images: {total_with_images}, errors: {total_errors}, "
-                   f"total time: {format_elapsed_time(elapsed_so_far)}, "
-                   f"average speed: {total_processed/elapsed_so_far:.1f} items/s, "
-                   f"estimated time remaining: {format_elapsed_time((len(all_releases) - total_processed) / (total_processed/elapsed_so_far) if total_processed > 0 else 0)}")
-        
-        # Brief rest between batches to avoid server overload
-        await asyncio.sleep(1)
-    
-    # Calculate overall statistics
-    elapsed = timer() - start
-    logger.info(f"Release image retrieval complete. Total: {total_processed} releases, {total_with_images} with images, "
-               f"{total_errors} errors. Total time: {format_elapsed_time(elapsed)}, "
-               f"average processing speed: {total_processed/elapsed:.1f} items/s")
 
+    # Process releases in batches
+    page_size = 100000  # Records per page
+    batch_size = 100   # Number of releases to process per batch
+    offset = 0
+    total_processed = 0
+    total_found = 0
+    total_time_elapsed = 0
+    
+    while True:
+        try:
+            # Get one page of release IDs
+            result = await util.RELEASE_CACHE.get_all_keys_paged(limit=page_size, offset=offset)
+            
+            if not result['keys']:  # result is a dictionary with 'keys' key
+                break
+            
+            keys_list = result['keys']
+            logger.info(f"Retrieved {len(keys_list)} release IDs from offset {offset}")
+            
+            batch_index = 0
+            total_batches = len(keys_list) // batch_size
+            # Process this page in smaller batches
+            for i in range(0, len(keys_list), batch_size):
+                start = timer()
+                batch = keys_list[i:i+batch_size]    
+
+                # Filter out releases that already have images
+                filtered_batch = []
+                for release_id in batch:
+                    images_result = await util.RELEASE_IMAGE_CACHE.get(release_id)
+                    if not images_result:
+                        filtered_batch.append(release_id)
+                    else:
+                        value, _ = images_result
+                        if not value:
+                            filtered_batch.append(release_id)
+                if not filtered_batch:
+                    logger.info("No releases to process, skipping batch")
+                    continue
+                else:
+                    logger.info(f"Found {len(filtered_batch)} releases without images")
+                
+                # Process the filtered batch with a progress bar
+                tasks = [process_release(release_id, release_image_provider) for release_id in filtered_batch]
+                release_image_results = await asyncio.gather(*tasks)
+
+                # Update stats
+                images_found = sum(1 for result in release_image_results if result)
+                total_processed += len(filtered_batch)
+                total_found += images_found
+                elapsed = timer() - start
+                total_time_elapsed += elapsed
+                # Log progress
+                logger.info(f"Batch {batch_index}/{total_batches} complete: Processed {len(filtered_batch)}, Found {images_found} images, {format_elapsed_time(elapsed, count=len(filtered_batch))}")
+                logger.info(f"Overall progress: {total_found}/{total_processed}, {format_elapsed_time(total_time_elapsed, count=total_processed)}")
+                logger.info("===============================================")
+                batch_index += 1
+            # If there's no more data, exit the loop
+            if not result['has_more']:
+                break
+                
+            # Update offset for next page
+            offset += page_size
+            
+        except Exception as e:
+            logger.error(f"Error processing batch: {str(e)}")
+            import traceback
+            logger.debug(f"Error stack: {traceback.format_exc()}")
+            continue
+    
 async def crawl():
     await asyncio.gather(
         update_wikipedia(count = CONFIG.CRAWLER_BATCH_SIZE['wikipedia'], max_ttl = 60 * 60 * 2),

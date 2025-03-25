@@ -305,7 +305,7 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
         'redis': DAYS * 7,
         'fanart': DAYS * 30,
         'wikipedia': DAYS * 7,
-        'release_image': MONTHS * 3,
+        'release_image': MONTHS * 1,
         'release': MONTHS * 3,
         'track': MONTHS * 3,
     }
@@ -491,10 +491,37 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
     LASTFM_KEY = '8212faf2c2b44eb8a7a2a9353730b282'
     LASTFM_SECRET = '27c14aedca1394cec9426695f85aa6e0'
 
-    # Spotify app details
-    SPOTIFY_REDIRECT_URL = ''
-    SPOTIFY_ID = '7d2bc03a3372423fb52729b1bda7097c'
-    SPOTIFY_SECRET = '64a0040db47f4c768e680570c3d9d363'
+    # Spotify app credentials
+    SPOTIFY_CREDENTIALS = [
+        {
+            'id': '2db54d025bc648d1882ac0467ecf48fd',
+            'secret': '35f3659dca7045baa1073d9f749bdd88'
+        },
+        {
+            'id': '7c800d690a8e43c88e58fd6c96acebac',
+            'secret': '36407648935d4a07957e2766e208e619'
+        },
+        {
+            'id': '722f70f56f494929b763cc353e1d8176',
+            'secret': 'f046502b3e0943d285167841ca09c5a3'
+        },
+        {
+            'id': '51ed1448c037447abe95cd02d413f450',
+            'secret': '9c41734dab8f48a19acdfca3f5ca2e44'
+        },
+        {
+            'id': 'df132b90db674bd0aeab4178d705cf21',
+            'secret': '5ec6a6259f0045e5b19786827e655abb'
+        },
+        {
+            'id': '22c26d33aacf444182da150afb2ce233',
+            'secret': '1d91eb195b784ec7a0b5b082873abed3'
+        },
+        {
+            'id': 'c4ce48a117b2497f8d768c8b35fb7fe9',
+            'secret': '97c8d98581794b29b9c486eecd4c3822'
+        }
+    ]
     SPOTIFY_MATCH_MIN_RATIO = 0.8
 
     # Whether or not running in production
@@ -511,8 +538,7 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
         'SOLRSEARCHPROVIDER': ([], {'SEARCH_SERVER': f'http://{MB_DB_HOST}:8983/solr'}),
         'FANARTTVPROVIDER': ([FANART_KEY], {}),
         'WIKIPEDIAPROVIDER': ([], {}),
-        'SPOTIFYAUTHPROVIDER': ([], {'CLIENT_ID': SPOTIFY_ID, 'CLIENT_SECRET': SPOTIFY_SECRET, 'REDIRECT_URI': SPOTIFY_REDIRECT_URL}),
-        'SPOTIFYPROVIDER': ([], {'CLIENT_ID': SPOTIFY_ID, 'CLIENT_SECRET': SPOTIFY_SECRET}),
+        'SPOTIFYPROVIDER': ([], {'CREDENTIALS': SPOTIFY_CREDENTIALS}),
         'COVERARTARCHIVEPROVIDER': ([], {}),
         'CACHERELEASEIMAGEPROVIDER': ([], {}),
         'CACHEARTISTIMAGEPROVIDER': ([], {}),

@@ -31,7 +31,7 @@ from lidarrmetadata.util import deprecated
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 logger.info('Have provider logger')
 
 CONFIG = get_config()
@@ -214,27 +214,6 @@ class ArtistNameSearchMixin(MixinBase):
         """
         pass
 
-class SpotifyAuthMixin(MixinBase):
-    """
-    Provides/renews tokens for spotify API
-    """
-
-    @abc.abstractmethod
-    def get_token(self, code):
-        """
-        Gets spotify token as part of oAuth callback
-        :param code: Auth code from spotify
-        :return: Spotify access and refresh code
-        """
-        pass
-
-    def renew_token(self, refresh_token):
-        """
-        Renews access code given refresh token
-        :param refresh_token: refresh token
-        :return: Spotify access and refresh code
-        """
-        pass
 
 class ReleaseGroupByArtistMixin(MixinBase):
     """
@@ -1119,57 +1098,6 @@ class FanArtTvProvider(HttpProvider,
             'large': url,
             'original': url
         }
-
-class SpotifyAuthProvider(HttpProvider,
-                          SpotifyAuthMixin):
-    
-    """
-    Provider to handle OAuth redirect from spotify
-    """
-    def __init__(self,
-                 token_url='https://accounts.spotify.com/api/token',
-                 redirect_uri='',
-                 client_id='',
-                 client_secret=''):
-        """
-        Class initialization
-        """
-        super(SpotifyAuthProvider, self).__init__('spotify')
-        self._token_url = token_url
-        self._redirect_uri = redirect_uri
-        self._client_id = client_id
-        self._client_secret = client_secret
-
-    async def get_token(self, code):
-
-        body = {'grant_type': 'authorization_code',
-                'code': code,
-                'redirect_uri': self._redirect_uri,
-                'client_id': self._client_id,
-                'client_secret': self._client_secret}
-
-        session = await self._get_session()
-        async with session.post(self._token_url, data=body) as resp:
-            resp.raise_for_status()
-            json = await resp.json()
-
-            access_token = json.get('access_token', '')
-            expires_in = json.get('expires_in', '')
-            refresh_token = json.get('refresh_token', '')
-
-            return access_token, expires_in, refresh_token
-            
-    async def refresh_token(self, refresh_token):
-
-        body = {'grant_type': 'refresh_token',
-                'refresh_token': refresh_token,
-                'client_id': self._client_id,
-                'client_secret': self._client_secret}
-
-        session = await self._get_session()
-        async with session.post(self._token_url, data=body) as resp:
-            resp.raise_for_status()
-            return await resp.json()
         
 class SolrSearchProvider(HttpProvider,
                          ArtistNameSearchMixin,
@@ -1690,20 +1618,173 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
     
     使用直接HTTP请求而非spotipy库与Spotify API交互
     实现了自动获取和刷新访问令牌的功能
+    支持多个 credentials 的轮转使用，防止单个 credential 被限流
     """
 
-    def __init__(self, client_id, client_secret):
+    class CredentialManager:
+        """管理多个 Spotify credentials 的类"""
+        
+        def __init__(self, credentials):
+            """
+            初始化 credential 管理器
+            
+            Args:
+                credentials: 包含多个 credential 的列表，每个 credential 是一个包含 id 和 secret 的字典
+            """
+            self.credentials = credentials
+            self.current_index = 0
+            self.credential_stats = []
+            self.last_rotation = datetime.datetime.now()
+            self.rotation_lock = asyncio.Lock()
+            
+            # 初始化每个 credential 的统计信息
+            for _ in credentials:
+                self.credential_stats.append({
+                    'request_count': 0,  # 每分钟请求计数
+                    'continuous_request_count': 0,  # 连续请求计数
+                    'last_request': None,
+                    'error_count': 0,
+                    'last_error': None,
+                    'is_healthy': True
+                })
+            
+            # 配置参数
+            self.max_requests_per_minute = 30  # 每分钟最大请求数
+            self.max_continuous_requests = 10  # 最大连续请求数
+            self.max_errors_before_rotation = 3  # 错误次数阈值
+            self.min_rotation_interval = 60  # 最小轮转间隔(秒)
+            self.health_check_interval = 300  # 健康检查间隔(秒)
+            
+        async def get_next_credential(self):
+            """
+            获取下一个可用的 credential
+            
+            Returns:
+                tuple: (client_id, client_secret)
+            """
+            async with self.rotation_lock:
+                await self._rotate_credential()
+                
+                # 更新当前 credential 的使用统计
+                self._update_stats()
+                
+                # 返回当前 credential
+                return self.credentials[self.current_index]['id'], self.credentials[self.current_index]['secret']
+        
+        def _should_rotate(self):
+            """
+            检查是否需要轮转 credential
+            
+            Returns:
+                bool: 是否需要轮转
+            """
+            current_stats = self.credential_stats[self.current_index]
+            now = datetime.datetime.now()
+            
+            # 检查请求频率
+            if current_stats['last_request']:
+                time_since_last_request = (now - current_stats['last_request']).total_seconds()
+                if time_since_last_request < 60:  # 1分钟内
+                    if current_stats['request_count'] >= self.max_requests_per_minute:
+                        logger.warning(f"Credential {self.current_index} 请求频率过高，需要轮转")
+                        return True
+            
+            # 检查连续请求次数
+            if current_stats['continuous_request_count'] >= self.max_continuous_requests:
+                logger.warning(f"Credential {self.current_index} 连续请求次数过多，需要轮转")
+                return True
+            
+            # 检查错误次数
+            if current_stats['error_count'] >= self.max_errors_before_rotation:
+                logger.warning(f"Credential {self.current_index} 错误次数过多，需要轮转")
+                return True
+            
+            # 检查健康状态
+            if not current_stats['is_healthy']:
+                logger.warning(f"Credential {self.current_index} 不健康，需要轮转")
+                return True
+            
+            # 检查轮转间隔
+            time_since_last_rotation = (now - self.last_rotation).total_seconds()
+            if time_since_last_rotation < self.min_rotation_interval:
+                return False
+            
+            return False
+        
+        async def _rotate_credential(self):
+            """
+            轮转到下一个 credential
+            """
+            # 重置当前 credential 的统计信息
+            self.credential_stats[self.current_index] = {
+                'request_count': 0,
+                'continuous_request_count': 0,
+                'last_request': None,
+                'error_count': 0,
+                'last_error': None,
+                'is_healthy': True
+            }
+            
+            # 轮转到下一个 credential
+            self.current_index = (self.current_index + 1) % len(self.credentials)
+            self.last_rotation = datetime.datetime.now()
+            
+            logger.info(f"已轮转到 credential {self.current_index}")
+            
+            # 启动健康检查
+            asyncio.create_task(self._health_check())
+        
+        def _update_stats(self):
+            """
+            更新当前 credential 的使用统计
+            """
+            now = datetime.datetime.now()
+            stats = self.credential_stats[self.current_index]
+            
+            # 如果距离上次请求超过1分钟，重置计数
+            if stats['last_request'] and (now - stats['last_request']).total_seconds() > 60:
+                stats['request_count'] = 0
+                stats['continuous_request_count'] = 0  # 重置连续请求计数
+            
+            stats['request_count'] += 1
+            stats['continuous_request_count'] += 1  # 增加连续请求计数
+            stats['last_request'] = now
+            logger.info(f"Credential {self.current_index} 当前请求计数: {stats['request_count']}, 连续请求计数: {stats['continuous_request_count']}")
+        
+        async def _health_check(self):
+            """
+            定期检查所有 credential 的健康状态
+            """
+            while True:
+                await asyncio.sleep(self.health_check_interval)
+                
+                async with self.rotation_lock:
+                    for i, stats in enumerate(self.credential_stats):
+                        if not stats['is_healthy']:
+                            # 如果 credential 不健康，尝试恢复
+                            stats['is_healthy'] = True
+                            stats['error_count'] = 0
+                            logger.info(f"Credential {i} 已恢复健康状态")
+        
+        def record_error(self):
+            """
+            记录当前 credential 的错误
+            """
+            stats = self.credential_stats[self.current_index]
+            stats['error_count'] += 1
+            stats['last_error'] = datetime.datetime.now()
+            stats['is_healthy'] = False
+
+    def __init__(self, credentials):
         """
         初始化Spotify提供程序
         
         Args:
-            client_id: Spotify应用客户端ID
-            client_secret: Spotify应用客户端密钥
+            credentials: 包含多个 credential 的列表，每个 credential 是一个包含 id 和 secret 的字典
         """
         super(SpotifyProvider, self).__init__('spotify')
         
-        self._client_id = client_id
-        self._client_secret = client_secret
+        self._credential_manager = self.CredentialManager(credentials)
         self._token = None
         self._token_expires = 0
         self._token_lock = asyncio.Lock()
@@ -1731,7 +1812,10 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
         """
         从Spotify获取新的访问令牌
         """
-        auth = base64.b64encode(f"{self._client_id}:{self._client_secret}".encode()).decode()
+        # 获取下一个可用的 credential
+        client_id, client_secret = await self._credential_manager.get_next_credential()
+        
+        auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
         headers = {
             "Authorization": f"Basic {auth}",
             "Content-Type": "application/x-www-form-urlencoded"
@@ -1756,6 +1840,7 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
                 
         except Exception as e:
             logger.error(f"获取Spotify令牌失败: {str(e)}")
+            self._credential_manager.record_error()  # 记录错误
             raise ProviderUnavailableException(f"Failed to get Spotify token: {str(e)}")
     
     async def _api_request(self, endpoint, params=None, retries=2):
@@ -1773,6 +1858,15 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
         url = f"{self._api_base_url}/{endpoint}"
         
         for attempt in range(retries + 1):
+            # 检查是否需要轮转credential
+            if self._credential_manager._should_rotate():
+                logger.debug("检测到需要轮转credential")
+                await self._credential_manager._rotate_credential()
+                # 强制刷新token以使用新的credential
+                async with self._token_lock:
+                    self._token_expires = 0
+                    await self._ensure_token()
+            
             # 获取令牌
             token = await self._ensure_token()
             headers = {"Authorization": f"Bearer {token}"}
@@ -1790,15 +1884,18 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
                         
                     # 处理429错误（限流）
                     if response.status == 429:
+                        self._credential_manager.record_error()  # 记录限流错误
                         retry_after = int(response.headers.get("Retry-After", "5"))
                         logger.warning(f"Spotify API限流，需要等待 {retry_after} 秒")
                         raise ProviderUnavailableException(f"Spotify API rate limited, retry after {retry_after} seconds")
                     
                     # 其他错误状态码
                     if not response.ok:
+                        self._credential_manager.record_error()  # 记录错误
                         response.raise_for_status()  # 这会引发ClientResponseError异常
                         
-                    # 正常情况，返回JSON响应
+                    # 正常情况，记录成功请求并返回JSON响应
+                    self._credential_manager._update_stats()  # 记录成功请求
                     return await response.json()
                         
             except aiohttp.ClientResponseError as e:
@@ -1807,6 +1904,7 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
                     await asyncio.sleep(1)
                     continue
                 logger.error(f"Spotify API响应错误: {str(e)}")
+                self._credential_manager.record_error()  # 记录错误
                 raise ProviderUnavailableException(f"Spotify API response error: {str(e)}")
                 
             except aiohttp.ClientError as e:
@@ -1815,10 +1913,12 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
                     await asyncio.sleep(1)
                     continue
                 logger.error(f"Spotify API连接错误: {str(e)}")
+                self._credential_manager.record_error()  # 记录错误
                 raise ProviderUnavailableException(f"Spotify API connection error: {str(e)}")
                 
             except Exception as e:
                 logger.error(f"Spotify API请求未预期错误: {str(e)}")
+                self._credential_manager.record_error()  # 记录错误
                 raise ProviderUnavailableException(f"Spotify API unexpected error: {str(e)}")
                 
         # 如果达到这里，说明所有重试都失败了
