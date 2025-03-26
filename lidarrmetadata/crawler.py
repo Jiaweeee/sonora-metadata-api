@@ -720,16 +720,16 @@ async def crawl_release_images():
 
                 # Filter out releases that already have images
                 filtered_batch = []
-                for release_id in batch:
-                    images_result = await util.RELEASE_IMAGE_CACHE.get(release_id)
-                    if not images_result:
+                batch_results = await util.RELEASE_IMAGE_CACHE.multi_get(batch)
+                for release_id, images_result in zip(batch, batch_results):
+                    value, expiry = images_result
+                    # If the release has no images and no expiry, it means it's not in the cache
+                    if not value and not expiry:
                         filtered_batch.append(release_id)
-                    else:
-                        value, _ = images_result
-                        if not value:
-                            filtered_batch.append(release_id)
+                    
                 if not filtered_batch:
-                    logger.info("No releases to process, skipping batch")
+                    logger.info(f"No releases to process, skipping batch {batch_index}/{total_batches}")
+                    batch_index += 1
                     continue
                 else:
                     logger.info(f"Found {len(filtered_batch)} releases without images")
