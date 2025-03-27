@@ -13,8 +13,6 @@ from datetime import timedelta
 import logging
 import aiohttp
 from timeit import default_timer as timer
-from spotipy import SpotifyException
-import Levenshtein
 from dateutil import parser
 
 import lidarrmetadata
@@ -22,6 +20,7 @@ from lidarrmetadata import api
 from lidarrmetadata import config
 from lidarrmetadata import provider
 from lidarrmetadata import util
+from lidarrmetadata.util import deprecated
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -176,17 +175,6 @@ async def get_artist_info_route(mbid):
     artist['works'] = releases
 
     return await add_cache_control_header(jsonify(artist), expiry)
-
-@api_bp.route('/artist/<mbid>/refresh', methods=['POST'])
-async def refresh_artist_route(mbid):
-    uuid_validation_response = validate_mbid(mbid)
-    if uuid_validation_response:
-        return uuid_validation_response
-
-    await util.ARTIST_CACHE.set(mbid, None)
-    base_url = app.config['CLOUDFLARE_URL_BASE'] + '/' +  app.config['ROOT_PATH'].lstrip('/').rstrip('/')
-    await invalidate_cloudflare([f'{base_url}/artist/{mbid}'])
-    return jsonify(success=True)
 
 @api_bp.route('/release/<mbid>', methods=['GET'])
 async def get_release_info_route(mbid):
@@ -358,119 +346,8 @@ def format_track_result(item):
     """Format track search result into standardized structure"""
     return format_search_result(item, 'track')
 
-@api_bp.route('/spotify/artist/<spotify_id>', methods=['GET'])
-async def spotify_lookup_artist(spotify_id):
-    mbid, expires = await util.SPOTIFY_CACHE.get(spotify_id)
 
-    if mbid == 0 and expires > provider.utcnow():
-        return jsonify(error='Not found'), 404
-    if mbid is not None:
-        return redirect(app.config['ROOT_PATH'] + url_for('get_artist_info_route', mbid=mbid), 301)
-
-    # Search on links in musicbrainz db
-    link_provider = provider.get_providers_implementing(provider.ArtistByIdMixin)[0]
-    artistid = await link_provider.get_artist_id_from_spotify_id(spotify_id)
-    logger.debug(f"Got match from musicbrainz db: {artistid}")
-    if artistid:
-        await util.SPOTIFY_CACHE.set(spotify_id, artistid, ttl=None)
-        return redirect(app.config['ROOT_PATH'] + url_for('get_artist_info_route', mbid=artistid), 301)
-
-    # Fall back to a text search for a popular album
-    try:
-        spotify_provider = provider.get_providers_implementing(provider.SpotifyIdMixin)[0]
-        spotifyalbum = spotify_provider.album_from_artist(spotify_id)
-    except SpotifyException:
-        await util.SPOTIFY_CACHE.set(spotify_id, 0, ttl=app.config['CACHE_TTL']['cloudflare'])
-        return jsonify(error='Not found'), 404
-
-    if spotifyalbum is None:
-        await util.SPOTIFY_CACHE.set(spotify_id, 0, ttl=app.config['CACHE_TTL']['cloudflare'])
-        return jsonify(error='Not found'), 404
-
-    spotifyalbum = await spotify_lookup_by_text_search(spotifyalbum)
-
-    if spotifyalbum is None:
-        await util.SPOTIFY_CACHE.set(spotify_id, 0, ttl=app.config['CACHE_TTL']['cloudflare'])
-        return jsonify(error='Not found'), 404
-
-    await util.SPOTIFY_CACHE.set(spotifyalbum['AlbumSpotifyId'], spotifyalbum['AlbumMusicBrainzId'], ttl=None)
-    await util.SPOTIFY_CACHE.set(spotifyalbum['ArtistSpotifyId'], spotifyalbum['ArtistMusicBrainzId'], ttl=None)
-
-    return redirect(app.config['ROOT_PATH'] + url_for('get_artist_info_route', mbid=spotifyalbum['ArtistMusicBrainzId']), 301)
-
-@api_bp.route('/spotify/album/<spotify_id>', methods=['GET'])
-async def spotify_lookup_album(spotify_id):
-    mbid, expires = await util.SPOTIFY_CACHE.get(spotify_id)
-
-    if mbid == 0 and expires > provider.utcnow():
-        return jsonify(error='Not found'), 404
-    if mbid is not None:
-        return redirect(app.config['ROOT_PATH'] + url_for('get_release_group_info_route', mbid=mbid), 301)
-
-    # Search on links in musicbrainz db
-    link_provider = provider.get_providers_implementing(provider.ReleaseGroupByIdMixin)[0]
-    albumid = await link_provider.get_release_group_id_from_spotify_id(spotify_id)
-    logger.debug(f"Got match from musicbrainz db: {albumid}")
-    if albumid:
-        await util.SPOTIFY_CACHE.set(spotify_id, 0, ttl=app.config['CACHE_TTL']['cloudflare'])
-        return redirect(app.config['ROOT_PATH'] + url_for('get_release_group_info_route', mbid=albumid), 301)
-
-    # Fall back to a text search
-    try:
-        spotify_provider = provider.get_providers_implementing(provider.SpotifyIdMixin)[0]
-        spotifyalbum = spotify_provider.album(spotify_id)
-    except SpotifyException:
-        await util.SPOTIFY_CACHE.set(spotify_id, 0, ttl=None)
-        return jsonify(error='Not found'), 404
-
-    spotifyalbum = await spotify_lookup_by_text_search(spotifyalbum)
-    if spotifyalbum is None:
-        return jsonify(error='Not found'), 404
-
-    await util.SPOTIFY_CACHE.set(spotifyalbum['AlbumSpotifyId'], spotifyalbum['AlbumMusicBrainzId'], ttl=None)
-
-    return redirect(app.config['ROOT_PATH'] + url_for('get_release_group_info_route', mbid=spotifyalbum['AlbumMusicBrainzId']), 301)
-
-async def spotify_lookup_by_text_search(spotifyalbum):
-    logger.debug(f"Looking for album corresponding to Artist: {spotifyalbum['Artist']} Album: {spotifyalbum['Album']}")    
-    
-    # do search
-    search_provider = provider.get_providers_implementing(provider.AlbumNameSearchMixin)[0]
-    result = await search_provider.search_album_name(spotifyalbum['Album'], artist_name=spotifyalbum['Artist'], limit=1)
-
-    if not result:
-        ttl = app.config['CACHE_TTL']['cloudflare']
-        await util.SPOTIFY_CACHE.set(spotifyalbum['AlbumSpotifyId'], 0, ttl=ttl)
-        await util.SPOTIFY_CACHE.set(spotifyalbum['ArtistSpotifyId'], 0, ttl=ttl)
-        return None
-
-    # Map back to an artist
-    albumid = result[0]['Id']
-    album, validity = await api.get_release_group_info(result[0]['Id'])
-    artistid = album['artistid']
-
-    found_title = album['title']
-    found_artist = next(filter(lambda a: a['id'] == artistid, album['artists']))['artistname']
-
-    title_dist = Levenshtein.ratio(found_title, spotifyalbum['Album'])
-    artist_dist = Levenshtein.ratio(found_artist, spotifyalbum['Artist'])
-    min_ratio = app.config['SPOTIFY_MATCH_MIN_RATIO']
-
-    if title_dist < min_ratio or artist_dist < min_ratio:
-        ttl = app.config['CACHE_TTL']['cloudflare']
-        await util.SPOTIFY_CACHE.set(spotifyalbum['AlbumSpotifyId'], 0, ttl=ttl)
-        await util.SPOTIFY_CACHE.set(spotifyalbum['ArtistSpotifyId'], 0, ttl=ttl)
-        return None
-
-    logger.info(f"Mapped Spotify Album: '{spotifyalbum['Album']}' by '{spotifyalbum['Artist']}' to Musicbrainz Album: '{found_title}' ({title_dist}) by '{found_artist}' ({artist_dist})")
-
-    spotifyalbum['AlbumMusicBrainzId'] = albumid
-    spotifyalbum['ArtistMusicBrainzId'] = artistid
-
-    return spotifyalbum
-
-
-    
+@deprecated(reason="Need to be re-implemented")
 @api_bp.route('/invalidate')
 @no_cache
 async def invalidate_cache():
