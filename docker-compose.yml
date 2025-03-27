@@ -33,6 +33,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+      cache_from:
+        - metadata-api:latest
+    image: metadata-api:latest
     restart: unless-stopped
     depends_on:
       - redis
