@@ -1654,24 +1654,20 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
             self.max_continuous_requests = 10  # 最大连续请求数
             self.max_errors_before_rotation = 3  # 错误次数阈值
             self.min_rotation_interval = 60  # 最小轮转间隔(秒)
-            self.health_check_interval = 300  # 健康检查间隔(秒)
             
-        async def get_next_credential(self):
+            # Do health check at initialization
+            self._health_check()
+        
+        async def get_credential(self):
             """
-            获取下一个可用的 credential
+            获取当前的 credential
             
             Returns:
                 tuple: (client_id, client_secret)
             """
             async with self.rotation_lock:
-                await self._rotate_credential()
-                
-                # 更新当前 credential 的使用统计
-                self._update_stats()
-                
-                # 返回当前 credential
                 return self.credentials[self.current_index]['id'], self.credentials[self.current_index]['secret']
-        
+
         def _should_rotate(self):
             """
             检查是否需要轮转 credential
@@ -1778,41 +1774,38 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
             self.last_rotation = datetime.datetime.now()
             
             logger.info(f"已轮转到 credential {self.current_index}")
-            
-            # 启动健康检查
-            asyncio.create_task(self._health_check())
-            
+
+            # Do health check at every rotation
+            self._health_check()
+        
         async def _health_check(self):
             """
-            定期检查所有 credential 的健康状态
-            """
-            while True:
-                await asyncio.sleep(self.health_check_interval)
-                
-                async with self.rotation_lock:
-                    for i, stats in enumerate(self.credential_stats):
-                        if not stats.get('is_healthy', True):
-                            now = datetime.datetime.now()
-                            last_error = stats.get('last_error')
-                            retry_after = stats.get('retry_after', 0)
-                            
-                            # 如果存在最后错误时间且已经过了足够的恢复时间
-                            if last_error and (now - last_error).total_seconds() > retry_after:
-                                # 恢复健康状态
-                                stats['is_healthy'] = True
-                                stats['error_count'] = 0
-                                stats['retry_after'] = 0
-                                logger.info(f"Credential {i} 已恢复健康状态，等待时间已过")
-                            else:
-                                # 计算还需等待的时间
-                                if last_error and retry_after > 0:
-                                    elapsed = (now - last_error).total_seconds()
-                                    remaining = max(0, retry_after - elapsed)
-                                    logger.debug(f"Credential {i} 仍处于恢复期，还需等待 {remaining:.1f} 秒")
+            Check the health of all credentials
+            """ 
+            async with self.rotation_lock:
+                for i, stats in enumerate(self.credential_stats):
+                    if not stats.get('is_healthy', True):
+                        now = datetime.datetime.now()
+                        last_error = stats.get('last_error')
+                        retry_after = stats.get('retry_after', 0)
+                        
+                        # 如果存在最后错误时间且已经过了足够的恢复时间
+                        if last_error and (now - last_error).total_seconds() > retry_after:
+                            # 恢复健康状态
+                            stats['is_healthy'] = True
+                            stats['error_count'] = 0
+                            stats['retry_after'] = 0
+                            logger.info(f"Credential {i} 已恢复健康状态，等待时间已过")
+                        else:
+                            # 计算还需等待的时间
+                            if last_error and retry_after > 0:
+                                elapsed = (now - last_error).total_seconds()
+                                remaining = max(0, retry_after - elapsed)
+                                logger.debug(f"Credential {i} 仍处于恢复期，还需等待 {remaining:.1f} 秒")
         
         def _update_stats(self):
             """
-            更新当前 credential 的使用统计
+            Update the usage stats of the current credential
             """
             now = datetime.datetime.now()
             stats = self.credential_stats[self.current_index]
@@ -1829,10 +1822,10 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
         
     def __init__(self, credentials):
         """
-        初始化Spotify提供程序
+        Initialize the Spotify provider
         
         Args:
-            credentials: 包含多个 credential 的列表，每个 credential 是一个包含 id 和 secret 的字典
+            credentials: A list of credentials, each containing id and secret
         """
         super(SpotifyProvider, self).__init__('spotify')
         
@@ -1842,6 +1835,9 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
         self._token_lock = asyncio.Lock()
         self._api_base_url = "https://api.spotify.com/v1"
         
+        # Log - do not start health check automatically, will start when first used
+        logger.info(f"Initialized SpotifyProvider with {len(credentials)} credentials")
+    
     async def _ensure_token(self):
         """
         确保有一个有效的访问令牌，如果令牌过期则刷新
@@ -1864,8 +1860,8 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
         """
         从Spotify获取新的访问令牌
         """
-        # 获取下一个可用的 credential
-        client_id, client_secret = await self._credential_manager.get_next_credential()
+        # Get credential
+        client_id, client_secret = await self._credential_manager.get_credential()
         
         auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
         headers = {
@@ -1910,11 +1906,11 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
         url = f"{self._api_base_url}/{endpoint}"
         
         for attempt in range(retries + 1):
-            # 检查是否需要轮转credential
+            # Check if we need to rotate the credential
             if self._credential_manager._should_rotate():
-                logger.debug("检测到需要轮转credential")
+                logger.debug("Detected need to rotate credential")
                 await self._credential_manager._rotate_credential()
-                # 强制刷新token以使用新的credential
+                # Force refresh the token to use the new credential
                 async with self._token_lock:
                     self._token_expires = 0
                     await self._ensure_token()

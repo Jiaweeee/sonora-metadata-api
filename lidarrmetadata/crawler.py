@@ -274,9 +274,8 @@ async def filter_artists_without_images():
             batch = all_artists[i:i+batch_size]
             logger.debug(f"Checking ARTIST_IMAGE_CACHE for artist batch {i//batch_size + 1}/{len(all_artists)//batch_size + 1}...")
             
-            # Check in parallel if artists in this batch already have images
-            tasks = [util.ARTIST_IMAGE_CACHE.get(artist_id) for artist_id in batch]
-            results = await asyncio.gather(*tasks)
+            # Check if artists in this batch already have images
+            results = await util.ARTIST_IMAGE_CACHE.multi_get(batch)
             
             # Only keep artist IDs without images
             for j, result in enumerate(results):
@@ -317,11 +316,13 @@ async def get_images_from_spotify(mbid):
     api_requests_count = 0
     
     try:
-        # Initialize SpotifyProvider
-        spotify_provider = provider.get_providers_implementing(provider.SpotifyProvider)[0]
-        if not spotify_provider:
+        # 获取 SpotifyProvider (确保它已经被正确初始化)
+        spotify_providers = provider.get_providers_implementing(provider.SpotifyProvider)
+        if not spotify_providers:
             logger.error("No valid SpotifyProvider found, cannot retrieve Spotify images")
             return {}, None, False, 0
+            
+        spotify_provider = spotify_providers[0]
             
         # Get spotify_ids from SPOTIFY_CACHE
         spotify_ids_result = await util.SPOTIFY_CACHE.get(mbid)
@@ -351,16 +352,24 @@ async def get_images_from_spotify(mbid):
                 # Increment API request count
                 api_requests_count += 1
                 
-                # Use async API request directly
-                images, expiry = await spotify_provider.get_artist_images(spotify_id)
-                
-                logger.debug(f"Spotify API request completed, took: {timer() - start_request:.2f}s")
-                
-                if images:
-                    logger.debug(f"Successfully retrieved images for artist {mbid} from Spotify: found {len(images)} image URLs")
-                    return images, expiry, True, api_requests_count
-                else:
-                    logger.debug(f"Artist {mbid}'s Spotify ID {spotify_id} did not return any images")
+                # Use async API request directly with proper error handling for event loop issues
+                try:
+                    images, expiry = await spotify_provider.get_artist_images(spotify_id)
+                    
+                    logger.debug(f"Spotify API request completed, took: {timer() - start_request:.2f}s")
+                    
+                    if images:
+                        logger.debug(f"Successfully retrieved images for artist {mbid} from Spotify: found {len(images)} image URLs")
+                        return images, expiry, True, api_requests_count
+                    else:
+                        logger.debug(f"Artist {mbid}'s Spotify ID {spotify_id} did not return any images")
+                    
+                except RuntimeError as re:
+                    if "attached to a different loop" in str(re):
+                        logger.error(f"Event loop error with Spotify provider: {str(re)}")
+                        logger.info("Continuing with next provider due to event loop conflict")
+                        break  # Skip Spotify entirely and try the next provider
+                    raise
             except ProviderUnavailableException as pu:
                 # Handle ProviderUnavailableException
                 if "429" in str(pu):
@@ -500,7 +509,7 @@ async def retrieve_artist_images(artist_ids):
         
         # If not the first request, wait 2 seconds
         if i > 0:
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
         
         try:
             images = {}
