@@ -14,7 +14,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from lidarrmetadata.cache import PostgresCache
 from lidarrmetadata import config
-
+from lidarrmetadata import util
+from lidarrmetadata import provider
 # 配置日志
 logging.basicConfig(level=logging.INFO, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -24,6 +25,25 @@ logger = logging.getLogger('sync_cache')
 BATCH_SIZE = 10000
 MAX_RETRIES = 3
 RETRY_INTERVAL = 5
+
+# 远程数据库连接参数
+REMOTE_HOST = '82.29.153.93'  # 替换为实际的远程主机地址
+REMOTE_PORT = 54321
+REMOTE_USER = 'abc'  # 替换为实际的远程用户名
+REMOTE_PASSWORD = 'abc'  # 替换为实际的远程密码
+REMOTE_DB = 'lm_cache_db'  # 替换为实际的远程数据库名
+
+# 获取所有的可用缓存名称（从util模块）
+AVAILABLE_CACHES = {
+    'spotify': util.SPOTIFY_CACHE,
+    'artist': util.ARTIST_CACHE,
+    'fanart': util.FANART_CACHE,
+    'wikipedia': util.WIKI_CACHE,
+    'release_image': util.RELEASE_IMAGE_CACHE,
+    'release': util.RELEASE_CACHE,
+    'track': util.TRACK_CACHE,
+    'artist_image': util.ARTIST_IMAGE_CACHE
+}
 
 async def get_cache_instance(cache_name, config_obj, is_remote=False):
     """获取缓存实例，可以是本地或远程的"""
@@ -42,11 +62,11 @@ async def get_cache_instance(cache_name, config_obj, is_remote=False):
         
         if is_remote:
             # 将远程连接信息替换到配置中
-            cache_config['endpoint'] = args.remote_host
-            cache_config['port'] = args.remote_port
-            cache_config['user'] = args.remote_user
-            cache_config['password'] = args.remote_password
-            cache_config['db_name'] = args.remote_db
+            cache_config['endpoint'] = REMOTE_HOST
+            cache_config['port'] = REMOTE_PORT
+            cache_config['user'] = REMOTE_USER
+            cache_config['password'] = REMOTE_PASSWORD
+            cache_config['db_name'] = REMOTE_DB
         
         logger.debug(f"处理后的缓存配置: {cache_config}")
         cache = PostgresCache(**cache_config)
@@ -188,22 +208,16 @@ async def sync_cache(source_cache, target_cache, cache_name):
                 # 获取当前批次的所有键值对
                 pairs = []
                 failed_keys = []
-                
-                for key in tqdm(keys, desc=f"读取 {cache_name} 数据", leave=False):
-                    try:
-                        # 正确处理 get 方法的返回值
-                        get_result = await source_cache.get(key)
-                        logger.debug(f"键 {key} 的 get 结果类型: {type(get_result)}")
-                        
-                        value, _ = get_result
+
+                source_results = await source_cache.multi_get(keys)
+                for key, result in zip(keys, source_results):
+                    if result is None:
+                        failed_keys.append(key)
+                    else:
+                        value, _ = result
                         pairs.append((key, value))
-                    except Exception as e:
-                        if args.ignore_errors:
-                            logger.warning(f"获取键 {key} 的值失败，但继续处理: {e}")
-                        else:
-                            logger.warning(f"获取键 {key} 的值失败: {e}")
-                            failed_keys.append(key)
                 
+                # Log the number of failed keys
                 if failed_keys:
                     logger.warning(f"共有 {len(failed_keys)} 个键获取失败")
                 
@@ -259,7 +273,7 @@ async def sync_cache(source_cache, target_cache, cache_name):
         raise
 
 async def main():
-    """主函数：同步 SPOTIFY_CACHE 和 ARTIST_CACHE"""
+    """主函数：同步所有可用的缓存"""
     global BATCH_SIZE, MAX_RETRIES, RETRY_INTERVAL
     
     # 更新全局参数
@@ -283,16 +297,21 @@ async def main():
         # 决定要同步的缓存
         cache_names = []
         if args.all:
-            cache_names = ['spotify', 'artist']
+            # 使用所有可用的缓存（除了default）
+            cache_names = list(AVAILABLE_CACHES.keys())
         else:
-            if args.spotify:
-                cache_names.append('spotify')
-            if args.artist:
-                cache_names.append('artist')
+            # 处理指定的缓存
+            for cache_name in args.caches:
+                if cache_name in AVAILABLE_CACHES:
+                    cache_names.append(cache_name)
+                else:
+                    logger.warning(f"未知的缓存名称: {cache_name}，将被忽略")
             
             # 如果没有指定任何缓存，默认同步所有
             if not cache_names:
-                cache_names = ['spotify', 'artist']
+                cache_names = list(AVAILABLE_CACHES.keys())
+        
+        logger.info(f"将同步以下缓存: {', '.join(cache_names)}")
         
         # 创建源缓存和目标缓存实例
         for cache_name in cache_names:
@@ -325,13 +344,6 @@ async def main():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='同步缓存数据到远程服务器')
     
-    # 必要的远程连接参数
-    parser.add_argument('--remote-host', required=True, help='远程数据库主机')
-    parser.add_argument('--remote-port', type=int, default=5432, help='远程数据库端口')
-    parser.add_argument('--remote-user', required=True, help='远程数据库用户名')
-    parser.add_argument('--remote-password', required=True, help='远程数据库密码')
-    parser.add_argument('--remote-db', required=True, help='远程数据库名称')
-    
     # 性能和执行控制参数
     parser.add_argument('--batch-size', type=int, default=BATCH_SIZE, help='每批处理的记录数')
     parser.add_argument('--max-retries', type=int, default=MAX_RETRIES, help='操作失败时的最大重试次数')
@@ -340,10 +352,8 @@ if __name__ == "__main__":
     parser.add_argument('--max-loop-count', type=int, default=1000, help='最大循环次数，防止无限循环')
     
     # 缓存选择参数
-    cache_group = parser.add_mutually_exclusive_group()
-    cache_group.add_argument('--all', action='store_true', help='同步所有缓存（默认）')
-    cache_group.add_argument('--spotify', action='store_true', help='只同步 Spotify 缓存')
-    cache_group.add_argument('--artist', action='store_true', help='只同步 Artist 缓存')
+    parser.add_argument('--all', action='store_true', help='同步所有可用缓存（默认）')
+    parser.add_argument('--caches', nargs='+', help='指定要同步的缓存名称，如 spotify artist fanart wikipedia release_image release track artist_image')
     
     # 输出控制参数
     output_group = parser.add_mutually_exclusive_group()
