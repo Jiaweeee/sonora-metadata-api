@@ -167,14 +167,6 @@ async def get_artist_info_multi(mbids):
 
     return [(item['data'], item['expiry']) for item in artists]
 
-def combine_images(a, b):
-    result = a
-    extra_types = {i['CoverType'] for i in b} - {i['CoverType'] for i in a}
-    extra_images = [i for i in b if i['CoverType'] in extra_types]
-    result.extend(extra_images)
-
-    return result
-
 async def get_artist_release_groups(mbid):
     release_group_providers = provider.get_providers_implementing(
         provider.ReleaseGroupByArtistMixin)
@@ -357,7 +349,15 @@ async def get_release_info(mbid):
 
     # Use the earliest expiry
     expiry = provider.utcnow() + timedelta(seconds = CONFIG.CACHE_TTL['release'])
-    expiry = min(expiry, overview_expiry, image_expiry)
+    
+    # Check if expiry values are not None before using min()
+    if overview_expiry is not None and image_expiry is not None:
+        expiry = min(expiry, overview_expiry, image_expiry)
+    elif overview_expiry is not None:
+        expiry = min(expiry, overview_expiry)
+    elif image_expiry is not None:
+        expiry = min(expiry, image_expiry)
+        
     return release, expiry
 
 async def get_release_search_results(query, limit, artist_name=''):
@@ -442,7 +442,8 @@ async def get_track_info(mbid):
 
     # Use the earlist expiry
     expiry = provider.utcnow() + timedelta(seconds = CONFIG.CACHE_TTL['track'])
-    expiry = min(expiry, image_expiry)
+    if image_expiry is not None:
+        expiry = min(expiry, image_expiry)
 
     return track, expiry
 
