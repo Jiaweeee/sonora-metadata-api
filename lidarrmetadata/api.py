@@ -271,26 +271,31 @@ async def get_release_info_basic(mbid):
 
 def get_streaming_links(links):
     """
-    从发行版的链接列表中提取流媒体服务的链接
+    从发行版的链接列表中提取流媒体服务的链接，每个服务类型只保留一个链接
     :param links: 链接列表，每个链接包含 'type' 和 'url' 字段
-    :return: 流媒体服务的链接列表。当前只支持 Spotify 和 Apple Music
+    :return: 流媒体服务的链接列表。当前只支持 Spotify 和 Apple Music，每个服务只返回一个链接
     """
     if not links:
         return None
-    streaming_links = []
+        
+    # 使用字典记录已添加的服务类型
+    service_links = {}
+    
     for link in links:
         if 'streaming' in link.get('type', ''):
             url = link.get('url', link.get('target', '')).lower()
-            if 'spotify' in url:
-                streaming_links.append({
+            if 'spotify' in url and 'spotify' not in service_links:
+                service_links['spotify'] = {
                     'source': 'spotify',
                     'url': link.get('url', link.get('target'))
-                })
-            elif 'music.apple' in url:
-                streaming_links.append({
+                }
+            elif 'music.apple' in url and 'apple_music' not in service_links:
+                service_links['apple_music'] = {
                     'source': 'apple_music',
                     'url': link.get('url', link.get('target'))
-                })
+                }
+                
+    streaming_links = list(service_links.values())
     return streaming_links if streaming_links else None
 
 def get_artist_streaming_links(links):
