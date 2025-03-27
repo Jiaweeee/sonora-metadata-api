@@ -540,9 +540,28 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
         {
             'id': '5e7a432bfdbc4db6a46e5283b4a5fe3a',
             'secret': '30fa601c23964aec8098a1b284d7c4b9'
+        },
+        {
+            'id': '053fda57923b4fb9901ca1ca8ee848f6',
+            'secret': '2de133dde26046e595364672d44d49b1'
+        },
+        {
+            'id': '4d5ac0e3ff334017953bcbd804ad16cf',
+            'secret': '51477fbe5d39474087c0aa7519cdb8bc'
+        },
+        {
+            'id': '093ae8fb1ced46e79bf7697486c7bd6c',
+            'secret': '94592e6339574f16bd33c9e50d8200e8'
+        },
+        {
+            'id': 'da029c33d3cb49ba92ef60135ab153d3',
+            'secret': '2c8c626e738f4b94bb039a054b6212e4'
+        },
+        {
+            'id': '8da9406c55694de8b2c5960055297500',
+            'secret': '3b5f4253ab5c44e689e40fdecd0a62cb'
         }
     ]
-    SPOTIFY_MATCH_MIN_RATIO = 0.8
 
     # Whether or not running in production
     PRODUCTION = False
