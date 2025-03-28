@@ -770,6 +770,7 @@ async def get_taste_picks_chart():
         # add more info
         chart['id'] = 'taste-picks'
         chart['title'] = 'Taste Picks'
+        chart['image'] = 'https://p.sda1.dev/23/c2215f23d36b9c79caf7c9437d03275a/taste-picks.png'
         
         return chart
     except Exception as e:
@@ -797,6 +798,7 @@ async def get_on_air_chart():
         # add more info
         chart['id'] = 'on-air'
         chart['title'] = 'On Air'
+        chart['image'] = 'https://p.sda1.dev/23/96ce2cbac29237317fe5b1e26d71001e/on-air.png'
             
         return chart
     except Exception as e:
@@ -824,6 +826,7 @@ async def get_stream_hits_chart():
         # add more info
         chart['id'] = 'stream-hits'
         chart['title'] = 'Stream Hits'
+        chart['image'] = 'https://p.sda1.dev/23/37d9d8e592fb889d5d7b31fc7ff28202/stream-hits.png'
 
         return chart
     except Exception as e:
@@ -851,6 +854,7 @@ async def get_indie_gems_chart():
         # add more info
         chart['id'] = 'indie-gems'
         chart['title'] = 'Indie Gems'   
+        chart['image'] = 'https://p.sda1.dev/23/5a266652458a8d5a320fba1c6cf2ae08/indie-gems.png'
 
         return chart
     except Exception as e:
@@ -878,6 +882,7 @@ async def get_rising_stars_chart():
         # add more info
         chart['id'] = 'rising-stars'
         chart['title'] = 'Rising Stars'
+        chart['image'] = 'https://p.sda1.dev/23/475fc1ee612467e1a07a26cc734f5031/rising-stars.png'
 
         return chart
     except Exception as e:
