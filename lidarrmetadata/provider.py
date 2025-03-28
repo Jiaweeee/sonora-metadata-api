@@ -1635,7 +1635,6 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
             self.current_index = 0
             self.credential_stats = []
             self.last_rotation = datetime.datetime.now()
-            self.rotation_lock = asyncio.Lock()
             
             # 初始化每个 credential 的统计信息
             for _ in credentials:
@@ -1665,8 +1664,7 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
             Returns:
                 tuple: (client_id, client_secret)
             """
-            async with self.rotation_lock:
-                return self.credentials[self.current_index]['id'], self.credentials[self.current_index]['secret']
+            return self.credentials[self.current_index]['id'], self.credentials[self.current_index]['secret']
 
         def _should_rotate(self):
             """
@@ -1782,26 +1780,25 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
             """
             Check the health of all credentials
             """ 
-            async with self.rotation_lock:
-                for i, stats in enumerate(self.credential_stats):
-                    if not stats.get('is_healthy', True):
-                        now = datetime.datetime.now()
-                        last_error = stats.get('last_error')
-                        retry_after = stats.get('retry_after', 0)
-                        
-                        # 如果存在最后错误时间且已经过了足够的恢复时间
-                        if last_error and (now - last_error).total_seconds() > retry_after:
-                            # 恢复健康状态
-                            stats['is_healthy'] = True
-                            stats['error_count'] = 0
-                            stats['retry_after'] = 0
-                            logger.info(f"Credential {i} 已恢复健康状态，等待时间已过")
-                        else:
-                            # 计算还需等待的时间
-                            if last_error and retry_after > 0:
-                                elapsed = (now - last_error).total_seconds()
-                                remaining = max(0, retry_after - elapsed)
-                                logger.debug(f"Credential {i} 仍处于恢复期，还需等待 {remaining:.1f} 秒")
+            for i, stats in enumerate(self.credential_stats):
+                if not stats.get('is_healthy', True):
+                    now = datetime.datetime.now()
+                    last_error = stats.get('last_error')
+                    retry_after = stats.get('retry_after', 0)
+                    
+                    # 如果存在最后错误时间且已经过了足够的恢复时间
+                    if last_error and (now - last_error).total_seconds() > retry_after:
+                        # 恢复健康状态
+                        stats['is_healthy'] = True
+                        stats['error_count'] = 0
+                        stats['retry_after'] = 0
+                        logger.info(f"Credential {i} 已恢复健康状态，等待时间已过")
+                    else:
+                        # 计算还需等待的时间
+                        if last_error and retry_after > 0:
+                            elapsed = (now - last_error).total_seconds()
+                            remaining = max(0, retry_after - elapsed)
+                            logger.debug(f"Credential {i} 仍处于恢复期，还需等待 {remaining:.1f} 秒")
         
         def _update_stats(self):
             """
