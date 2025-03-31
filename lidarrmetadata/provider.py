@@ -1774,7 +1774,7 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
             logger.info(f"已轮转到 credential {self.current_index}")
 
             # Do health check at every rotation
-            self._health_check()
+            await self._health_check()
         
         async def _health_check(self):
             """
@@ -1817,14 +1817,14 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
             stats['last_request'] = now
             logger.info(f"Credential {self.current_index} 当前请求计数: {stats['request_count']}, 连续请求计数: {stats['continuous_request_count']}")
         
-    def __init__(self, credentials):
+    def __init__(self, credentials, session=None):
         """
         Initialize the Spotify provider
         
         Args:
             credentials: A list of credentials, each containing id and secret
         """
-        super(SpotifyProvider, self).__init__('spotify')
+        super(SpotifyProvider, self).__init__('spotify', session=session)
         
         self._credential_manager = self.CredentialManager(credentials)
         self._token = None
@@ -1844,12 +1844,10 @@ class SpotifyProvider(HttpProvider, ArtistArtworkMixin):
         """
         now = datetime.datetime.now().timestamp()
         
-        # 使用锁确保只有一个协程可以刷新令牌
-        async with self._token_lock:
-            # 检查令牌是否已过期或即将过期(留5分钟的缓冲时间)
-            if not self._token or now > (self._token_expires - 300):
-                logger.debug("获取新的Spotify访问令牌")
-                await self._get_new_token()
+        # 检查令牌是否已过期或即将过期(留5分钟的缓冲时间)
+        if not self._token or now > (self._token_expires - 300):
+            logger.debug("获取新的Spotify访问令牌")
+            await self._get_new_token()
                 
         return self._token
     

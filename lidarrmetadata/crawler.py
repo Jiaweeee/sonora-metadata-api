@@ -1,15 +1,12 @@
 import argparse
 import asyncio
-import datetime
 from datetime import timedelta
 import logging
 from timeit import default_timer as timer
-import sys
 
 import aiohttp
 import sentry_sdk
 
-import lidarrmetadata
 from lidarrmetadata.config import get_config
 from lidarrmetadata import provider
 from lidarrmetadata.provider import ProviderUnavailableException
@@ -23,6 +20,80 @@ logger.setLevel(logging.DEBUG)
 logger.info('Have crawler logger')
 
 CONFIG = get_config()
+
+# Global shared instances of providers
+_SPOTIFY_PROVIDER = None
+_FANART_PROVIDER = None
+
+# Global shared session
+_SESSION = None
+
+async def get_shared_session():
+    """
+    Get or create a shared aiohttp session
+    
+    Returns:
+        aiohttp.ClientSession: A shared session instance
+    """
+    global _SESSION
+    if _SESSION is None:
+        logger.info("Creating global shared aiohttp session")
+        _SESSION = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=CONFIG.EXTERNAL_TIMEOUT / 1000),
+            trust_env=True
+        )
+    return _SESSION
+
+async def get_spotify_provider():
+    """
+    获取或初始化全局共享的 SpotifyProvider 实例
+    
+    Returns:
+        SpotifyProvider: 全局共享的 SpotifyProvider 实例
+    """
+    global _SPOTIFY_PROVIDER
+    if _SPOTIFY_PROVIDER is None:
+        logger.info("Initializing global SpotifyProvider")
+        credentials = CONFIG.SPOTIFY_CREDENTIALS
+        if not credentials:
+            logger.warning("No Spotify credentials provided")
+            return None
+            
+        try:
+            session = await get_shared_session()
+            # 使用共享的 session 初始化 SpotifyProvider
+            _SPOTIFY_PROVIDER = provider.SpotifyProvider(
+                credentials=credentials,
+                session=session
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize SpotifyProvider: {str(e)}")
+            return None
+    
+    return _SPOTIFY_PROVIDER
+
+async def get_fanart_provider():
+    """
+    获取或初始化全局共享的 FanArtTvProvider 实例
+    
+    Returns:
+        FanArtTvProvider: 全局共享的 FanArtTvProvider 实例
+    """
+    global _FANART_PROVIDER
+    if _FANART_PROVIDER is None:
+        logger.info("Initializing global FanArtTvProvider")
+        try:
+            session = await get_shared_session()
+            # 使用共享的 session 初始化 FanArtTvProvider
+            _FANART_PROVIDER = provider.FanArtTvProvider(
+                api_key=CONFIG.FANART_KEY,
+                session=session
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize FanArtTvProvider: {str(e)}")
+            return None
+    
+    return _FANART_PROVIDER
 
 if CONFIG.SENTRY_DSN:
     if CONFIG.SENTRY_REDIS_HOST is not None:
@@ -316,13 +387,11 @@ async def get_images_from_spotify(mbid):
     api_requests_count = 0
     
     try:
-        # 获取 SpotifyProvider (确保它已经被正确初始化)
-        spotify_providers = provider.get_providers_implementing(provider.SpotifyProvider)
-        if not spotify_providers:
-            logger.error("No valid SpotifyProvider found, cannot retrieve Spotify images")
+        # 获取全局共享的 SpotifyProvider
+        spotify_provider = await get_spotify_provider()
+        if not spotify_provider:
+            logger.error("No valid SpotifyProvider available, cannot retrieve Spotify images")
             return {}, None, False, 0
-            
-        spotify_provider = spotify_providers[0]
             
         # Get spotify_ids from SPOTIFY_CACHE
         spotify_ids_result = await util.SPOTIFY_CACHE.get(mbid)
@@ -352,24 +421,17 @@ async def get_images_from_spotify(mbid):
                 # Increment API request count
                 api_requests_count += 1
                 
-                # Use async API request directly with proper error handling for event loop issues
-                try:
-                    images, expiry = await spotify_provider.get_artist_images(spotify_id)
-                    
-                    logger.debug(f"Spotify API request completed, took: {timer() - start_request:.2f}s")
-                    
-                    if images:
-                        logger.debug(f"Successfully retrieved images for artist {mbid} from Spotify: found {len(images)} image URLs")
-                        return images, expiry, True, api_requests_count
-                    else:
-                        logger.debug(f"Artist {mbid}'s Spotify ID {spotify_id} did not return any images")
-                    
-                except RuntimeError as re:
-                    if "attached to a different loop" in str(re):
-                        logger.error(f"Event loop error with Spotify provider: {str(re)}")
-                        logger.info("Continuing with next provider due to event loop conflict")
-                        break  # Skip Spotify entirely and try the next provider
-                    raise
+                # 使用全局共享的 SpotifyProvider 获取图片
+                images, expiry = await spotify_provider.get_artist_images(spotify_id)
+                
+                logger.debug(f"Spotify API request completed, took: {timer() - start_request:.2f}s")
+                
+                if images:
+                    logger.debug(f"Successfully retrieved images for artist {mbid} from Spotify: found {len(images)} image URLs")
+                    return images, expiry, True, api_requests_count
+                else:
+                    logger.debug(f"Artist {mbid}'s Spotify ID {spotify_id} did not return any images")
+                
             except ProviderUnavailableException as pu:
                 # Handle ProviderUnavailableException
                 if "429" in str(pu):
@@ -417,10 +479,10 @@ async def get_images_from_fanart(mbid):
             - api_request_count: Number of API requests sent
     """
     try:
-        # Initialize FanartTvProvider
-        fanart_provider = provider.get_providers_implementing(provider.FanArtTvProvider)[0]
+        # 使用全局共享的 FanArtTvProvider
+        fanart_provider = await get_fanart_provider()
         if not fanart_provider:
-            logger.warning("No valid FanartTvProvider found, cannot retrieve FanartTV images")
+            logger.warning("No valid FanartTvProvider available, cannot retrieve FanartTV images")
             return {}, None, False, 0
             
         logger.debug(f"Retrieving images for artist {mbid} from FanartTV")
@@ -545,11 +607,10 @@ async def retrieve_artist_images(artist_ids):
                             
                 logger.debug(f"Successfully retrieved images for artist {mbid} (source: {image_source}): found {len(images)} image URLs")
                 
+                # Log progress every 10 artists or at the end
                 if total_processed % 10 == 0 or total_processed == len(artist_ids):
                     logger.info(f"Progress: {total_processed}/{len(artist_ids)} artists ({total_with_images} with images [Spotify: {total_spotify_images}, FanartTV: {total_fanart_images}], {total_errors} errors), "
                               f"processed {format_elapsed_time(timer() - start, total_processed)}, API request count: {api_requests_count}")
-                else:
-                    logger.debug(f"Could not find images for artist {mbid} (no results from Spotify or FanartTV)")
             
         except Exception as e:
             logger.error(f"Error processing MusicBrainz artist ID {mbid}: {str(e)}")
@@ -771,6 +832,32 @@ async def crawl_release_images():
             logger.debug(f"Error stack: {traceback.format_exc()}")
             continue
     
+async def cleanup_resources():
+    """
+    清理全局资源，确保在程序退出时正确关闭所有连接
+    """
+    global _SESSION
+    
+    if _SESSION:
+        logger.info("Closing shared aiohttp session")
+        try:
+            await _SESSION.close()
+            _SESSION = None
+        except Exception as e:
+            logger.error(f"Error closing shared session: {str(e)}")
+
+async def run_with_cleanup(coro_func):
+    """
+    运行协程函数并确保在完成后清理资源
+    
+    Args:
+        coro_func: 要运行的协程函数
+    """
+    try:
+        return await coro_func
+    finally:
+        await cleanup_resources()
+
 async def crawl():
     await asyncio.gather(
         update_wikipedia(count = CONFIG.CRAWLER_BATCH_SIZE['wikipedia'], max_ttl = 60 * 60 * 2),
@@ -794,27 +881,21 @@ def main():
     parser.add_argument("--crawl-artist-images", action="store_true")
     args = parser.parse_args()
     
-    if args.init_artists:
-        asyncio.run(init_artists())
-        sys.exit()
-
-    if args.init_spotify:
-        asyncio.run(init_spotify())
-        sys.exit()
-        
-    if args.init_releases:
-        asyncio.run(init_releases())
-        sys.exit()
-        
-    if args.crawl_release_images:
-        asyncio.run(crawl_release_images())
-        sys.exit()
-        
-    if args.crawl_artist_images:
-        asyncio.run(crawl_artist_images())
-        sys.exit()
+    async def run_task():
+        if args.init_artists:
+            await init_artists()
+        elif args.init_spotify:
+            await init_spotify()
+        elif args.init_releases:
+            await init_releases()
+        elif args.crawl_release_images:
+            await crawl_release_images()
+        elif args.crawl_artist_images:
+            await crawl_artist_images()
+        else:
+            await crawl()
     
-    asyncio.run(crawl())
+    asyncio.run(run_with_cleanup(run_task()))
     
 if __name__ == "__main__":
     main()
