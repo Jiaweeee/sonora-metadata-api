@@ -132,7 +132,7 @@ async def get_artist_info_multi(mbids):
     start = timer()
 
     artist_providers = provider.get_providers_implementing(provider.ArtistByIdMixin)
-    artist_art_providers = provider.get_providers_implementing(provider.ArtistArtworkMixin)
+    artist_art_providers = provider.get_providers_implementing(provider.CacheArtistImageProvider)
     
     if not artist_providers:
         # 500 error if we don't have an artist provider since it's essential
@@ -527,7 +527,7 @@ async def get_artist_search_results(query, limit):
     artist_ids = [item['id'] for item in artists]
     
     # Get artwork provider
-    artwork_providers = provider.get_providers_implementing(provider.ArtistArtworkMixin)
+    artwork_providers = provider.get_providers_implementing(provider.CacheArtistImageProvider)
     if artwork_providers:
         # Get images for each artist
         artwork_provider = artwork_providers[0]
