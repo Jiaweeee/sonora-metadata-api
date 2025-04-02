@@ -157,7 +157,8 @@ async def get_artist_info_multi(mbids):
         for i, artist in enumerate(artists):
             images, expiry = results[i]
             artist['data']['images'] = images
-            artist['expiry'] = min(artist['expiry'], expiry)
+            if expiry is not None:
+                artist['expiry'] = min(artist['expiry'], expiry) if artist['expiry'] is not None else expiry
     else:
         for artist in artists:
             artist['images'] = None
@@ -167,7 +168,8 @@ async def get_artist_info_multi(mbids):
     for i, artist in enumerate(artists):
         overview, expiry = results[i]
         artist['data']['overview'] = overview
-        artist['expiry'] = min(artist['expiry'], expiry)
+        if expiry is not None:
+            artist['expiry'] = min(artist['expiry'], expiry) if artist['expiry'] is not None else expiry
             
     logger.debug(f"Got basic artist info for {len(mbids)} artists in {(timer() - start) * 1000:.0f}ms ")
 
