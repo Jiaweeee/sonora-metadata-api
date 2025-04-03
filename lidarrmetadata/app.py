@@ -7,13 +7,15 @@ from quart import Quart, abort, make_response, request, jsonify, redirect, url_f
 from quart.exceptions import HTTPStatusException
 
 import redis
-import sentry_sdk
-from sentry_sdk.integrations.flask import FlaskIntegration
 from datetime import timedelta
 import logging
 import aiohttp
 from timeit import default_timer as timer
 from dateutil import parser
+
+# 导入 Prometheus 相关库
+from prometheus_client import make_asgi_app, generate_latest, CONTENT_TYPE_LATEST
+from lidarrmetadata.metrics import metrics
 
 import lidarrmetadata
 from lidarrmetadata import api
@@ -35,19 +37,13 @@ api_bp = Blueprint('api', __name__, url_prefix='/api')
 app = Quart(__name__)
 app.config.from_object(config.get_config())
 
-if app.config['SENTRY_DSN']:
-    if app.config['SENTRY_REDIS_HOST'] is not None:
-        processor = util.SentryRedisTtlProcessor(redis_host=app.config['SENTRY_REDIS_HOST'],
-                                                redis_port=app.config['SENTRY_REDIS_PORT'],
-                                                ttl=app.config['SENTRY_TTL'])
-    else:
-        processor = util.SentryTtlProcessor(ttl=app.config['SENTRY_TTL'])
+# 初始化 Prometheus 指标
+metrics.init_app(app)
 
-    sentry_sdk.init(dsn=app.config['SENTRY_DSN'],
-                    integrations=[FlaskIntegration()],
-                    release=f"lidarr-metadata-{lidarrmetadata.__version__}",
-                    before_send=processor.create_event,
-                    send_default_pii=True)
+# 添加 metrics 路由到 API 蓝图中
+@api_bp.route('/metrics')
+async def api_metrics():
+    return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
 
 # Allow all endpoints to be cached by default
 @app.after_request
@@ -98,8 +94,9 @@ def get_search_query():
     return query
 
 @app.errorhandler(500)
-def handle_error(e):
-    sentry_sdk.capture_exception(e)
+async def handle_error(e):
+    metrics.record_exception(e)
+    # sentry_sdk.capture_exception(e)
     return jsonify(error='Internal server error'), 500
 
 @app.errorhandler(HTTPStatusException)
@@ -108,26 +105,32 @@ async def handle_http_error(e):
 
 @app.errorhandler(api.ArtistNotFoundException)
 async def handle_error(e):
+    metrics.record_exception(e)
     return jsonify(error='Artist not found'), 404
 
 @app.errorhandler(api.ReleaseNotFoundException)
 async def handle_error(e):
+    metrics.record_exception(e)
     return jsonify(error='Release not found'), 404
 
 @app.errorhandler(api.TrackNotFoundException)
 async def handle_error(e):
+    metrics.record_exception(e)
     return jsonify(error='Track not found'), 404
 
 @app.errorhandler(api.DiscoverContentException)
 async def handle_discover_content_error(e):
+    metrics.record_exception(e)
     return jsonify(error=e.message), 503
 
 @app.errorhandler(redis.ConnectionError)
-def handle_error(e):
+async def handle_error(e):
+    metrics.record_exception(e)
     return jsonify(error='Could not connect to redis'), 503
 
 @app.errorhandler(redis.BusyLoadingError)
-def handle_error(e):
+async def handle_error(e):
+    metrics.record_exception(e)
     return jsonify(error='Redis not ready'), 503
 
 def validate_mbid(mbid):

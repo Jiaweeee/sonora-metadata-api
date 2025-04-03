@@ -27,3 +27,35 @@ docker-compose ps
 ```shell
 docker-compose logs -f metadata-api
 ```
+
+# 性能监控
+
+项目使用 Prometheus 和 Grafana 进行API性能监控。
+
+## 监控指标
+
+- **请求耗时**: 通过 Histogram 类型指标跟踪每个接口的响应时间，包括不同百分位数（50%、95%）
+- **请求量**: 记录1小时内各接口的请求总数
+- **QPS (每秒查询率)**: 实时监控各接口的每秒请求数
+- **请求成功率**: 监控API接口的成功率（2xx状态码请求占总请求比例）
+
+## 启动监控服务
+
+```bash
+# 启动 Prometheus 和 Grafana
+docker-compose up -d prometheus grafana
+```
+
+## 访问监控界面
+
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000 (用户名/密码: admin/admin)
+
+Grafana已预配置了一个用于监控API性能指标的仪表盘。
+
+## 自定义监控
+
+可以通过修改以下文件自定义监控:
+
+- `prometheus.yml`: 修改Prometheus抓取配置
+- `grafana/dashboards/sonora_metadata_api_dashboard.json`: 自定义Grafana仪表盘

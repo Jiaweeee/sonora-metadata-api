@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'Lidarr API Metrics'
+    orgId: 1
+    folder: 'Lidarr'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards 
