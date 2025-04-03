@@ -1,7 +1,6 @@
 from prometheus_client import Counter, Histogram, Gauge, Summary
 import time
-from functools import wraps
-from quart import request, current_app
+from quart import request
 
 class PrometheusMetrics:
     def __init__(self, app=None):

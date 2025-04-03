@@ -3,18 +3,17 @@ import uuid
 import functools
 import asyncio
 
-from quart import Quart, abort, make_response, request, jsonify, redirect, url_for
+from quart import Quart, abort, make_response, request, jsonify
 from quart.exceptions import HTTPStatusException
 
 import redis
 from datetime import timedelta
 import logging
 import aiohttp
-from timeit import default_timer as timer
 from dateutil import parser
 
 # 导入 Prometheus 相关库
-from prometheus_client import make_asgi_app, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from lidarrmetadata.metrics import metrics
 
 import lidarrmetadata
