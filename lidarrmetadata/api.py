@@ -85,7 +85,7 @@ def postgres_cache(cache):
             now = provider.utcnow()
 
             cached, expiry = await cache.get(mbid)
-            if cached and expiry > now:
+            if cached and expiry is not None and expiry > now:
                 logger.debug(f"Cache hit for {mbid} in {cache.__class__.__name__}")
                 return cached, expiry
             
