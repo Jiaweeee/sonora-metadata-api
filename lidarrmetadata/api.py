@@ -353,8 +353,9 @@ async def get_release_info(mbid):
         return None, provider.utcnow()
     
     # Get overview
-    overview, overview_expiry = await get_overview(release.get('wiki_links', []))
-    release['overview'] = overview
+    # overview, overview_expiry = await get_overview(release.get('wiki_links', []))
+    overview_expiry = None
+    release['overview'] = '' # 暂时不获取 overview
     
     # Get images
     images, image_expiry = await get_release_images(mbid)
