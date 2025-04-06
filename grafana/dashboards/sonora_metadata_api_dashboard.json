@@ -101,7 +101,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"lidarr_api\"}[5m])) by (le, endpoint))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"lidarr_api\", endpoint!=\"api.api_metrics\"}[5m])) by (le, endpoint))",
           "refId": "A",
           "legendFormat": "{{endpoint}} - 95th"
         },
@@ -110,7 +110,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum(rate(http_request_duration_seconds_bucket{job=\"lidarr_api\"}[5m])) by (le, endpoint))",
+          "expr": "histogram_quantile(0.5, sum(rate(http_request_duration_seconds_bucket{job=\"lidarr_api\", endpoint!=\"api.api_metrics\"}[5m])) by (le, endpoint))",
           "refId": "B",
           "legendFormat": "{{endpoint}} - 50th"
         }
@@ -197,7 +197,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(rate(http_requests_total{job=\"lidarr_api\"}[1m])) by (endpoint)",
+          "expr": "sum(rate(http_requests_total{job=\"lidarr_api\", endpoint!=\"api.api_metrics\"}[1m])) by (endpoint)",
           "refId": "A",
           "legendFormat": "{{endpoint}}"
         }
@@ -265,7 +265,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(rate(http_requests_total{job=\"lidarr_api\", status=~\"2..\"}[1h])) / sum(rate(http_requests_total{job=\"lidarr_api\"}[1h])) * 100",
+          "expr": "sum(rate(http_requests_total{job=\"lidarr_api\", status=~\"2..\", endpoint!=\"api.api_metrics\"}[1h])) / sum(rate(http_requests_total{job=\"lidarr_api\", endpoint!=\"api.api_metrics\"}[1h])) * 100",
           "refId": "A"
         }
       ],
@@ -351,7 +351,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(increase(http_requests_total{job=\"lidarr_api\"}[1h])) by (endpoint)",
+          "expr": "sum(increase(http_requests_total{job=\"lidarr_api\", endpoint!=\"api.api_metrics\"}[1h])) by (endpoint)",
           "refId": "A",
           "legendFormat": "{{endpoint}}"
         }
