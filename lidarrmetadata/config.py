@@ -560,6 +560,46 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
         {
             'id': '8da9406c55694de8b2c5960055297500',
             'secret': '3b5f4253ab5c44e689e40fdecd0a62cb'
+        },
+        {
+            'id': '3e4cd3a8790340cab824ef912b8edba0',
+            'secret': 'd8402e14a8a844d48f68c8054e08a06c'
+        },
+        {
+            'id': 'a792e09b6a2a45c5927152cf6de38668',
+            'secret': 'ecf864be49f14dd5b8f3d3a27a3f2ec7'
+        },
+        {
+            'id': 'e331680ae5c04403811ae3a4fc49f413',
+            'secret': '2ae91e23831d4aa9976e8e16e6e4397d'
+        },
+        {
+            'id': '07ccc6614446455a91fceb7bb0ddea67',
+            'secret': 'b59efcf5739c4ad985c71aa8629ea19c'
+        },
+        {
+            'id': '7e79848dd64041c3a8a6a65c8729d3ae',
+            'secret': '498b306af04b41c1a4066389ff4127da'
+        },
+        {
+            'id': 'e3eab5f5d8574f3881959f3bc09ae09b',
+            'secret': 'edf74597ba224f61b3f950c32a8117a8'
+        },
+        {
+            'id': '5c4a8efb13c24fb6b495e4368e4751f3',
+            'secret': 'ebe870f593bd4f3ea2ca027e8347b9a9'
+        },
+        {
+            'id': '7d6909af7acf44b183d1a9ce6bdb0f1c',
+            'secret': 'dfebc35a46c24d79b9e0bd96fa66c1ee'
+        },
+        {
+            'id': 'a71d674f01de49ab97cad7b868265938',
+            'secret': '7ba9323a2cf14a2aacfd307f0b0b555f'
+        },
+        {
+            'id': '738147af919742b0b7d082bea591a38f',
+            'secret': '6d78833b12334f1aa1730421af14406b'
         }
     ]
 
