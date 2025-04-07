@@ -351,12 +351,12 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(increase(http_requests_total{job=\"lidarr_api\", endpoint!=\"api.api_metrics\"}[1h])) by (endpoint)",
+          "expr": "sum(increase(http_requests_total{job=\"lidarr_api\", endpoint!=\"api.api_metrics\"}[1d])) by (endpoint)",
           "refId": "A",
           "legendFormat": "{{endpoint}}"
         }
       ],
-      "title": "Total Requests per Endpoint (1h)",
+      "title": "Total Requests per Endpoint (1d)",
       "type": "timeseries"
     }
   ],

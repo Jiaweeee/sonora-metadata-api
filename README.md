@@ -42,14 +42,27 @@ docker-compose logs -f metadata-api
 ## 启动监控服务
 
 ```bash
-# 启动 Prometheus 和 Grafana
-docker-compose up -d prometheus grafana
+# 启动主要服务（包括 Prometheus）
+docker-compose up -d
+
+# 启动 Grafana（使用开发配置）
+docker-compose -f docker-compose.dev.yml up -d
+```
+
+## 停止监控服务
+
+```bash
+# 停止 Grafana
+docker-compose -f docker-compose.dev.yml down
+
+# 停止主要服务（包括 Prometheus）
+docker-compose down
 ```
 
 ## 访问监控界面
 
 - Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000 (用户名/密码: admin/admin)
+- Grafana: http://localhost:3000 (用户名/密码: sonora/sonoramusic)
 
 Grafana已预配置了一个用于监控API性能指标的仪表盘。
 
