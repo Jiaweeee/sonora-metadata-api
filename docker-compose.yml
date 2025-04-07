@@ -4,7 +4,7 @@ volumes:
   cache_pgdata:
     driver: local
   prometheus_data:
-  grafana_data:
+  # grafana_data:
 
 services:
   redis:
@@ -43,7 +43,7 @@ services:
       - redis
       - cache-db
     ports:
-      - "5001:5001"  # 假设API服务运行在5000端口，请根据实际情况调整
+      - "5001:5001"
     environment:
       - DB_USER=abc
       - DB_PASSWORD=abc
@@ -69,24 +69,6 @@ services:
     restart: unless-stopped
     networks:
       - monitoring
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-    environment:
-      - GF_SECURITY_ADMIN_USER=sonora
-      - GF_SECURITY_ADMIN_PASSWORD=sonoramusic
-      - GF_USERS_ALLOW_SIGN_UP=false
-    restart: unless-stopped
-    networks:
-      - monitoring
-    depends_on:
-      - prometheus
 
 networks:
   monitoring:
