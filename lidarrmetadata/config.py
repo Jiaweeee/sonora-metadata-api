@@ -583,16 +583,6 @@ class DefaultConfig(six.with_metaclass(ConfigMeta, ConfigBase)):
         'CACHEARTISTIMAGEPROVIDER': ([], {}),
     }
 
-    # Connection info for sentry. Defaults to None, in which case Sentry won't be used
-    SENTRY_DSN = None
-
-    # Redis connection info for sentry event processor. No redis connection info will fall back to a local processor
-    SENTRY_REDIS_HOST = REDIS_HOST
-    SENTRY_REDIS_PORT = REDIS_PORT
-
-    # Sentry rate limit TTL in seconds
-    SENTRY_TTL = 1
-
     # Stats server
     STATS_HOST = 'telegraf'
     STATS_PORT = 8092
@@ -615,8 +605,6 @@ class TestConfig(DefaultConfig):
     USE_CACHE = False
     ENABLE_STATS = False
     EXTERNAL_LIMIT_CLASS = 'NullRateLimiter'
-    SENTRY_REDIS_HOST = None
-    SENTRY_REDIS_PORT = None
     Testing = True
 
 

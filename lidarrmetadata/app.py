@@ -95,7 +95,6 @@ def get_search_query():
 @app.errorhandler(500)
 async def handle_error(e):
     metrics.record_exception(e)
-    # sentry_sdk.capture_exception(e)
     return jsonify(error='Internal server error'), 500
 
 @app.errorhandler(HTTPStatusException)

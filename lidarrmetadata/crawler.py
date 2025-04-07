@@ -5,7 +5,6 @@ import logging
 from timeit import default_timer as timer
 
 import aiohttp
-import sentry_sdk
 
 from lidarrmetadata.config import get_config
 from lidarrmetadata import provider
@@ -94,18 +93,6 @@ async def get_fanart_provider():
             return None
     
     return _FANART_PROVIDER
-
-if CONFIG.SENTRY_DSN:
-    if CONFIG.SENTRY_REDIS_HOST is not None:
-        processor = util.SentryRedisTtlProcessor(redis_host=CONFIG.SENTRY_REDIS_HOST,
-                                                 redis_port=CONFIG.SENTRY_REDIS_PORT,
-                                                 ttl=CONFIG.SENTRY_TTL)
-    else:
-        processor = util.SentryTtlProcessor(ttl=CONFIG.SENTRY_TTL)
-        
-    sentry_sdk.init(dsn=CONFIG.SENTRY_DSN,
-                    before_send=processor.create_event,
-                    send_default_pii=True)
 
 async def update_wikipedia(count = 50, max_ttl = 60 * 60):
     
