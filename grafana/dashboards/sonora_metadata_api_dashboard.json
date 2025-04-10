@@ -265,11 +265,11 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(rate(http_requests_total{job=\"lidarr_api\", status=~\"2..\", endpoint!=\"api.api_metrics\"}[1h])) / sum(rate(http_requests_total{job=\"lidarr_api\", endpoint!=\"api.api_metrics\"}[1h])) * 100",
+          "expr": "sum(rate(http_requests_total{job=\"lidarr_api\", status=~\"2..\", endpoint!=\"api.api_metrics\"}[1d])) / sum(rate(http_requests_total{job=\"lidarr_api\", endpoint!=\"api.api_metrics\"}[1d])) * 100",
           "refId": "A"
         }
       ],
-      "title": "API Success Rate (1h)",
+      "title": "API Success Rate (1d)",
       "type": "stat"
     },
     {
@@ -357,6 +357,93 @@
         }
       ],
       "title": "Total Requests per Endpoint (1d)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": ["total"],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(increase(http_requests_total{job=\"lidarr_api\", endpoint!=\"api.api_metrics\"}[1d])) by (endpoint, status)",
+          "refId": "A",
+          "legendFormat": "{{endpoint}} - {{status}}"
+        }
+      ],
+      "title": "HTTP Status Code Counts per Endpoint (1d)",
       "type": "timeseries"
     }
   ],
