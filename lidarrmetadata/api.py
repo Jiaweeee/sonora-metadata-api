@@ -392,7 +392,7 @@ async def get_release_search_results(query, limit, artist_name=''):
 
             def get_type(release_group):
                 if not release_group or 'primary-type' not in release_group:
-                    return 'Unknown'
+                    return 'Other'
                 return release_group['primary-type']
 
             search_result.append({
